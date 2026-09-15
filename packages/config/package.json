@@ -1,0 +1,28 @@
+{
+  "name": "@aegis/config",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Centralized configuration handling for the Aegis platform",
+  "license": "MIT",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "scripts": {
+    "build": "tsc --build",
+    "clean": "rm -rf dist *.tsbuildinfo",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@aegis/foundation": "workspace:*",
+    "@aegis/types": "workspace:*"
+  },
+  "devDependencies": {
+    "typescript": "*"
+  }
+}
