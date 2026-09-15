@@ -1,0 +1,18 @@
+# Prettier ignore file
+# Build outputs
+dist/
+build/
+out/
+coverage/
+
+# Dependency directories
+node_modules/
+
+# Lock files (managed by tools)
+pnpm-lock.yaml
+
+# Generated files
+*.tsbuildinfo
+
+# Environment files
+.env*
