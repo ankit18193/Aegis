@@ -1,0 +1,27 @@
+{
+  "name": "@aegis/api",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Aegis API application — entry point for the platform HTTP layer",
+  "license": "MIT",
+  "type": "module",
+  "main": "./dist/main.js",
+  "scripts": {
+    "build": "tsc --build",
+    "clean": "rm -rf dist *.tsbuildinfo",
+    "dev": "node --import tsx/esm src/main.ts",
+    "start": "node dist/main.js",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@aegis/config": "workspace:*",
+    "@aegis/contracts": "workspace:*",
+    "@aegis/foundation": "workspace:*",
+    "@aegis/logger": "workspace:*",
+    "@aegis/types": "workspace:*"
+  },
+  "devDependencies": {
+    "tsx": "^4.0.0",
+    "typescript": "*"
+  }
+}
