@@ -1,0 +1,42 @@
+{
+  "$schema": "https://json.schemastore.org/package.json",
+  "name": "aegis",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Aegis — Distributed AI Agent Execution Platform",
+  "license": "MIT",
+  "engines": {
+    "node": ">=20.0.0",
+    "pnpm": ">=9.0.0"
+  },
+  "packageManager": "pnpm@12.4.2",
+  "scripts": {
+    "build": "pnpm -r build",
+    "clean": "pnpm -r clean",
+    "format": "prettier --write .",
+    "format:check": "prettier --check .",
+    "lint": "eslint . --max-warnings 0",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "test:coverage": "vitest run --coverage",
+    "typecheck": "tsc --build tsconfig.json"
+  },
+  "pnpm": {
+    "allowedBuildScripts": [
+      "esbuild",
+      "unrs-resolver"
+    ]
+  },
+  "devDependencies": {
+    "@eslint/js": "^9.0.0",
+    "@types/node": "^20.0.0",
+    "@typescript-eslint/eslint-plugin": "^8.0.0",
+    "@typescript-eslint/parser": "^8.0.0",
+    "@vitest/coverage-v8": "^3.0.0",
+    "eslint": "^9.0.0",
+    "eslint-plugin-import-x": "^4.0.0",
+    "prettier": "^3.0.0",
+    "typescript": "^5.7.0",
+    "vitest": "^3.0.0"
+  }
+}
