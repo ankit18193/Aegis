@@ -3,6 +3,7 @@ import { createBrowserRouter, Navigate } from "react-router-dom";
 
 import { EmptyState } from "../components/ui/EmptyState";
 import { RunsLayout } from "../features/runs/components/RunsLayout";
+import { RunWorkspace } from "../features/runs/pages/RunWorkspace";
 
 import { App } from "./app";
 
@@ -33,14 +34,7 @@ export const router = createBrowserRouter([
           },
           {
             path: ":runId",
-            element: (
-              <div
-                className="flex-1 p-6 text-foreground-muted text-sm font-mono"
-                data-testid="run-workspace-placeholder"
-              >
-                Run Workspace Loading...
-              </div>
-            ),
+            element: <RunWorkspace />,
           },
         ],
       },
