@@ -1,6 +1,6 @@
-import { defineConfig } from "vitest/config";
 import { resolve } from "path";
 import { fileURLToPath } from "url";
+import { defineConfig } from "vitest/config";
 
 const __dirname = fileURLToPath(new URL(".", import.meta.url));
 
@@ -8,13 +8,18 @@ export default defineConfig({
   test: {
     globals: true,
     environment: "node",
-    include: ["packages/**/src/**/*.test.ts", "apps/**/src/**/*.test.ts"],
+    environmentMatchGlobs: [
+      ["apps/console/**", "jsdom"],
+      ["packages/**", "node"],
+    ],
+    setupFiles: ["./apps/console/src/test/setup.ts"],
+    include: ["packages/**/src/**/*.test.ts", "apps/**/src/**/*.test.{ts,tsx}"],
     exclude: ["**/node_modules/**", "**/dist/**"],
     coverage: {
       provider: "v8",
       reporter: ["text", "json", "html"],
-      include: ["packages/**/src/**/*.ts", "apps/**/src/**/*.ts"],
-      exclude: ["**/*.test.ts", "**/*.spec.ts", "**/index.ts"],
+      include: ["packages/**/src/**/*.ts", "apps/**/src/**/*.{ts,tsx}"],
+      exclude: ["**/*.test.ts", "**/*.test.tsx", "**/*.spec.ts", "**/index.ts"],
     },
     reporters: ["verbose"],
   },
