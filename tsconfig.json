@@ -8,6 +8,7 @@
     { "path": "packages/config" },
     { "path": "packages/logger" },
     { "path": "apps/api" },
-    { "path": "apps/worker" }
+    { "path": "apps/worker" },
+    { "path": "apps/console" }
   ]
 }
