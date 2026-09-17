@@ -4,20 +4,24 @@ import { Link, useParams } from "react-router-dom";
 
 import { Button } from "../../../components/ui/Button";
 import { EmptyState } from "../../../components/ui/EmptyState";
+import { ActivityTimeline } from "../../events/components/ActivityTimeline";
+import { useRunEvents } from "../../events/hooks/useRunEvents";
 import { TaskCard } from "../../tasks/components/TaskCard";
 import { TaskDetailDrawer } from "../../tasks/components/TaskDetailDrawer";
 import { RunHeader } from "../components/RunHeader";
 import { RunProgress } from "../components/RunProgress";
+import { RunResultView } from "../components/RunResultView";
 import { WorkflowProgress } from "../components/WorkflowProgress";
 import { useRun } from "../hooks/useRun";
 import type { TaskSummary } from "../types";
 
 export const RunWorkspace: React.FC = () => {
   const { runId } = useParams<{ runId: string }>();
-  const { run, isLoading, error } = useRun(runId);
+  const { run, isLoading: isRunLoading, error } = useRun(runId);
+  const { events, isLoading: isEventsLoading } = useRunEvents(runId);
   const [selectedTask, setSelectedTask] = React.useState<TaskSummary | null>(null);
 
-  if (isLoading) {
+  if (isRunLoading) {
     return (
       <div
         className="flex-1 flex flex-col items-center justify-center p-12 text-foreground-muted"
@@ -69,6 +73,9 @@ export const RunWorkspace: React.FC = () => {
 
       {/* Workspace Main Content */}
       <div className="flex-1 p-6 space-y-6 max-w-5xl">
+        {/* Run Result Output (when run has finished) */}
+        {run.result ? <RunResultView result={run.result} /> : null}
+
         {/* Workflow Progression Stepper */}
         <WorkflowProgress
           tasks={run.tasks}
@@ -109,6 +116,9 @@ export const RunWorkspace: React.FC = () => {
             ))}
           </div>
         </section>
+
+        {/* Activity Timeline Stream */}
+        <ActivityTimeline events={events} isLoading={isEventsLoading} />
       </div>
 
       {/* Task Inspection Slide-Over Drawer */}
