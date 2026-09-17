@@ -1,0 +1,3 @@
+# Ignore all local GStack artifacts and reports
+*
+!.gitignore

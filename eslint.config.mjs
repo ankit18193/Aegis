@@ -18,6 +18,9 @@ const config = [
       "**/*.d.ts",
       "eslint.config.mjs",
       "vitest.config.ts",
+      ".antigravity/**",
+      ".agents/**",
+      ".gstack/**",
     ],
   },
 

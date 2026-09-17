@@ -16,3 +16,8 @@ pnpm-lock.yaml
 
 # Environment files
 .env*
+
+# Engineering workflow layers
+.antigravity/
+.agents/
+.gstack/
