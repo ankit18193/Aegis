@@ -1,10 +1,13 @@
-import { ListOrdered, Search } from "lucide-react";
+import { useQueryClient } from "@tanstack/react-query";
+import { ListOrdered, RotateCcw, Search } from "lucide-react";
 import * as React from "react";
 import { Link, useParams } from "react-router-dom";
 
 import { EmptyState } from "../../../components/ui/EmptyState";
 import { cn } from "../../../lib/utils/cn";
 import { formatRelativeTime, truncate } from "../../../lib/utils/formatters";
+import { eventService } from "../../events/services/eventService";
+import { runService } from "../services/runService";
 import type { RunListItem } from "../types";
 
 import { StatusIndicator } from "./StatusIndicator";
@@ -13,16 +16,33 @@ export interface RunsSidebarProps {
   runs: RunListItem[];
   isLoading?: boolean;
   onNewRunClick?: () => void;
+  onSelectRun?: () => void;
   className?: string;
 }
 
 export const RunsSidebar: React.FC<RunsSidebarProps> = ({
   runs,
   isLoading = false,
+  onSelectRun,
   className,
 }) => {
+  const queryClient = useQueryClient();
   const { runId: activeRunId } = useParams<{ runId: string }>();
   const [filterQuery, setFilterQuery] = React.useState("");
+  const [isResetting, setIsResetting] = React.useState(false);
+
+  const handleResetData = async (): Promise<void> => {
+    setIsResetting(true);
+    try {
+      await runService.resetRuns();
+      await eventService.resetEvents();
+      await queryClient.invalidateQueries({ queryKey: ["runs"] });
+      await queryClient.invalidateQueries({ queryKey: ["run"] });
+      await queryClient.invalidateQueries({ queryKey: ["run-events"] });
+    } finally {
+      setIsResetting(false);
+    }
+  };
 
   const filteredRuns = React.useMemo(() => {
     if (!filterQuery.trim()) return runs;
@@ -106,6 +126,7 @@ export const RunsSidebar: React.FC<RunsSidebarProps> = ({
                   to={`/runs/${run.id}`}
                   aria-current={isActive ? "page" : undefined}
                   data-testid={`run-item-${run.id}`}
+                  onClick={() => { onSelectRun?.(); }}
                   className={cn(
                     "block p-3 transition-colors text-left relative group",
                     isActive
@@ -157,6 +178,22 @@ export const RunsSidebar: React.FC<RunsSidebarProps> = ({
             })}
           </nav>
         )}
+      </div>
+
+      {/* Sidebar Footer / Developer Utilities */}
+      <div className="p-3 border-t border-border-subtle bg-surface-raised/40 flex items-center justify-between text-xs text-foreground-muted">
+        <span className="text-[11px] font-mono text-foreground-muted">Aegis Mock v1.0</span>
+        <button
+          type="button"
+          onClick={() => { void handleResetData(); }}
+          disabled={isResetting}
+          data-testid="reset-demo-data-btn"
+          className="inline-flex items-center gap-1.5 text-[11px] font-mono text-foreground-muted hover:text-foreground transition-colors disabled:opacity-50"
+          title="Reset mock runs and events back to factory seed defaults"
+        >
+          <RotateCcw className={cn("w-3 h-3", isResetting && "animate-spin")} />
+          <span>{isResetting ? "Resetting..." : "Reset Data"}</span>
+        </button>
       </div>
     </aside>
   );
