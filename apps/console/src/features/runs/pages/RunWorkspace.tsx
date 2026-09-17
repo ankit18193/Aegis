@@ -11,6 +11,7 @@ import { TaskDetailDrawer } from "../../tasks/components/TaskDetailDrawer";
 import { RunHeader } from "../components/RunHeader";
 import { RunProgress } from "../components/RunProgress";
 import { RunResultView } from "../components/RunResultView";
+import { SimulationControls } from "../components/SimulationControls";
 import { WorkflowProgress } from "../components/WorkflowProgress";
 import { useRun } from "../hooks/useRun";
 import type { TaskSummary } from "../types";
@@ -65,8 +66,8 @@ export const RunWorkspace: React.FC = () => {
       className="flex-1 flex flex-col overflow-y-auto"
       data-testid="run-workspace"
     >
-      {/* Run Header */}
-      <RunHeader run={run} />
+      {/* Run Header with Simulation Controls */}
+      <RunHeader run={run} actions={<SimulationControls run={run} />} />
 
       {/* Progress Bar */}
       <RunProgress run={run} />
