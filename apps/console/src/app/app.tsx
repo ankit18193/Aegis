@@ -1,14 +1,25 @@
-import { Shield, Plus } from "lucide-react";
+import { Plus, Shield } from "lucide-react";
 import * as React from "react";
-import { Outlet, Link } from "react-router-dom";
+import { Link, Outlet } from "react-router-dom";
 
 import { Button } from "../components/ui/Button";
+import { NewRunModal } from "../features/runs/components/NewRunModal";
 
-export interface AppProps {
-  onNewRunClick?: () => void;
+export interface AppContextType {
+  openNewRunModal: () => void;
 }
 
-export const App: React.FC<AppProps> = ({ onNewRunClick }) => {
+export const App: React.FC = () => {
+  const [isModalOpen, setIsModalOpen] = React.useState(false);
+
+  const openNewRunModal = React.useCallback(() => {
+    setIsModalOpen(true);
+  }, []);
+
+  const closeNewRunModal = React.useCallback(() => {
+    setIsModalOpen(false);
+  }, []);
+
   return (
     <div className="min-h-screen flex flex-col bg-background text-foreground selection:bg-accent selection:text-white">
       {/* Top Console Navigation Bar */}
@@ -33,7 +44,7 @@ export const App: React.FC<AppProps> = ({ onNewRunClick }) => {
           <Button
             variant="primary"
             size="sm"
-            onClick={onNewRunClick}
+            onClick={openNewRunModal}
             data-testid="new-run-header-btn"
           >
             <Plus className="w-3.5 h-3.5" />
@@ -44,8 +55,11 @@ export const App: React.FC<AppProps> = ({ onNewRunClick }) => {
 
       {/* Main Workspace Slot */}
       <main className="flex-1 flex overflow-hidden">
-        <Outlet />
+        <Outlet context={{ openNewRunModal } satisfies AppContextType} />
       </main>
+
+      {/* New Run Modal */}
+      <NewRunModal isOpen={isModalOpen} onClose={closeNewRunModal} />
     </div>
   );
 };
