@@ -1,16 +1,21 @@
-import { AlertCircle, ArrowLeft, Loader2 } from "lucide-react";
+import { AlertCircle, ArrowLeft, CheckSquare, Loader2 } from "lucide-react";
 import * as React from "react";
 import { Link, useParams } from "react-router-dom";
 
 import { Button } from "../../../components/ui/Button";
 import { EmptyState } from "../../../components/ui/EmptyState";
+import { TaskCard } from "../../tasks/components/TaskCard";
+import { TaskDetailDrawer } from "../../tasks/components/TaskDetailDrawer";
 import { RunHeader } from "../components/RunHeader";
 import { RunProgress } from "../components/RunProgress";
+import { WorkflowProgress } from "../components/WorkflowProgress";
 import { useRun } from "../hooks/useRun";
+import type { TaskSummary } from "../types";
 
 export const RunWorkspace: React.FC = () => {
   const { runId } = useParams<{ runId: string }>();
   const { run, isLoading, error } = useRun(runId);
+  const [selectedTask, setSelectedTask] = React.useState<TaskSummary | null>(null);
 
   if (isLoading) {
     return (
@@ -62,44 +67,55 @@ export const RunWorkspace: React.FC = () => {
       {/* Progress Bar */}
       <RunProgress run={run} />
 
-      {/* Workspace Content Grid */}
-      <div className="flex-1 p-6 space-y-6">
-        {/* Placeholder for Commit 6 (Workflow & Tasks) and Commit 7 (Activity) */}
+      {/* Workspace Main Content */}
+      <div className="flex-1 p-6 space-y-6 max-w-5xl">
+        {/* Workflow Progression Stepper */}
+        <WorkflowProgress
+          tasks={run.tasks}
+          selectedTaskId={selectedTask?.id}
+          onTaskClick={(task) => { setSelectedTask(task); }}
+        />
+
+        {/* Task Inspection List */}
         <section
-          aria-labelledby="workflow-section-title"
-          className="bg-surface rounded-lg border border-border p-5"
-          data-testid="workspace-content"
+          aria-labelledby="tasks-section-title"
+          className="space-y-3"
+          data-testid="tasks-section"
         >
-          <div className="flex items-center justify-between mb-4">
-            <h2
-              id="workflow-section-title"
-              className="text-xs font-mono font-semibold uppercase tracking-wider text-foreground-muted"
-            >
-              Workflow: {run.workflow.name}
-            </h2>
-            <span className="text-xs font-mono text-foreground-muted">
-              {run.tasks.length.toString()} tasks defined
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <CheckSquare className="w-4 h-4 text-foreground-muted" />
+              <h2
+                id="tasks-section-title"
+                className="text-xs font-mono font-semibold uppercase tracking-wider text-foreground-muted"
+              >
+                Workflow Tasks ({run.tasks.length.toString()})
+              </h2>
+            </div>
+            <span className="text-[11px] font-mono text-foreground-muted">
+              Select a task to view execution details & outputs
             </span>
           </div>
 
           <div className="space-y-2">
             {run.tasks.map((task, idx) => (
-              <div
+              <TaskCard
                 key={task.id}
-                className="flex items-center justify-between p-3 rounded bg-surface-raised border border-border-subtle text-xs font-mono"
-              >
-                <div className="flex items-center gap-3">
-                  <span className="text-foreground-muted w-4 text-right">
-                    {(idx + 1).toString()}.
-                  </span>
-                  <span className="text-foreground font-medium">{task.name}</span>
-                </div>
-                <span className="capitalize text-foreground-muted">{task.status}</span>
-              </div>
+                task={task}
+                index={idx}
+                isSelected={selectedTask?.id === task.id}
+                onClick={(t) => { setSelectedTask(t); }}
+              />
             ))}
           </div>
         </section>
       </div>
+
+      {/* Task Inspection Slide-Over Drawer */}
+      <TaskDetailDrawer
+        task={selectedTask}
+        onClose={() => { setSelectedTask(null); }}
+      />
     </div>
   );
 };
