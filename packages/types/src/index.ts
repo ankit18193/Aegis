@@ -7,6 +7,12 @@ import type { HealthStatus } from "@aegis/foundation";
 /** Opaque brand utility for nominal typing. */
 type Brand<T, B extends string> = T & { readonly __brand: B };
 
+/** A unique identifier for an Execution Run. */
+export type RunId = Brand<string, "RunId">;
+
+/** A unique identifier for an Audit Event. */
+export type EventId = Brand<string, "EventId">;
+
 /** A unique identifier for an Agent. */
 export type AgentId = Brand<string, "AgentId">;
 
@@ -18,6 +24,21 @@ export type TaskId = Brand<string, "TaskId">;
 
 /** A unique identifier for a Worker node. */
 export type WorkerId = Brand<string, "WorkerId">;
+
+/**
+ * Creates a branded RunId from a raw string.
+ * Use this at trust boundaries (e.g., when reading from an API or database).
+ */
+export function runId(raw: string): RunId {
+  return raw as RunId;
+}
+
+/**
+ * Creates a branded EventId from a raw string.
+ */
+export function eventId(raw: string): EventId {
+  return raw as EventId;
+}
 
 /**
  * Creates a branded AgentId from a raw string.
