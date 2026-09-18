@@ -4,6 +4,7 @@ import fastify, { type FastifyInstance } from "fastify";
 
 import { loadApiConfig } from "./config/index.js";
 import { registerCorrelationHooks } from "./middleware/correlation.js";
+import { registerHealthRoutes } from "./routes/health.js";
 
 export interface BuildAppOptions {
   logger?: Logger;
@@ -34,6 +35,9 @@ export async function buildApp(options: BuildAppOptions = {}): Promise<FastifyIn
 
   // Register correlation & access logging
   registerCorrelationHooks(app, logger);
+
+  // Register health & readiness routes
+  registerHealthRoutes(app);
 
   return app;
 }
