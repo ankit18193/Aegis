@@ -1,9 +1,35 @@
+import type { IRunApiClient } from "@aegis/contracts";
 import { eventId, runId as toRunId } from "@aegis/types";
 
+import { HttpRunApiClient } from "../../../api/httpClient";
 import { SEED_EVENTS } from "../../../mocks/seedEvents";
 import type { RunEvent } from "../types";
 
 const EVENTS_STORAGE_KEY = "aegis_console_events_v1";
+
+let activeApiClient: IRunApiClient = new HttpRunApiClient();
+let mockOverride: boolean | null = null;
+
+export function setEventApiClient(client: IRunApiClient): void {
+  activeApiClient = client;
+}
+
+export function setEventUseMock(useMock: boolean | null): void {
+  mockOverride = useMock;
+}
+
+function isMockEnabled(): boolean {
+  if (mockOverride !== null) {
+    return mockOverride;
+  }
+  if (import.meta.env.VITE_USE_MOCK !== undefined) {
+    return import.meta.env.VITE_USE_MOCK === "true";
+  }
+  if (import.meta.env.MODE === "test") {
+    return true;
+  }
+  return false;
+}
 
 class MockEventRepository {
   private eventsByRunId = new Map<string, RunEvent[]>();
@@ -76,13 +102,13 @@ class MockEventRepository {
 
     const list = this.eventsByRunId.get(runId) ?? [];
     return [...list].sort(
-      (a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime()
+      (a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime(),
     );
   }
 
   public async addEvent(
     runId: string,
-    eventData: Omit<RunEvent, "id" | "runId">
+    eventData: Omit<RunEvent, "id" | "runId">,
   ): Promise<RunEvent> {
     this.initialize();
     await new Promise((resolve) => { setTimeout(resolve, 5); });
@@ -121,12 +147,29 @@ export const mockEventRepository = new MockEventRepository();
 
 export const eventService = {
   async getEvents(runId: string): Promise<RunEvent[]> {
-    return mockEventRepository.getEvents(runId);
+    if (isMockEnabled()) {
+      return mockEventRepository.getEvents(runId);
+    }
+
+    const result = await activeApiClient.getRunEvents(runId);
+    if (result.ok) {
+      return result.value.events;
+    }
+
+    if (result.error.error.code === "NOT_FOUND") {
+      return [];
+    }
+
+    if (result.error.error.code === "SERVICE_UNAVAILABLE") {
+      return mockEventRepository.getEvents(runId);
+    }
+
+    throw new Error(result.error.error.message);
   },
 
   async recordEvent(
     runId: string,
-    eventData: Omit<RunEvent, "id" | "runId">
+    eventData: Omit<RunEvent, "id" | "runId">,
   ): Promise<RunEvent> {
     return mockEventRepository.addEvent(runId, eventData);
   },
