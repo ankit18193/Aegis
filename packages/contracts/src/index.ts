@@ -86,3 +86,11 @@ export interface WorkflowRecord {
 export interface IEventPublisher {
   publish(topic: string, payload: unknown): Promise<Result<void>>;
 }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Canonical Domain Entity Contracts & Schemas
+// ─────────────────────────────────────────────────────────────────────────────
+
+export * from "./runs.js";
+export * from "./events.js";
+

@@ -16,11 +16,13 @@
   "scripts": {
     "build": "tsc --build",
     "clean": "rm -rf dist *.tsbuildinfo",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run"
   },
   "dependencies": {
     "@aegis/foundation": "workspace:*",
-    "@aegis/types": "workspace:*"
+    "@aegis/types": "workspace:*",
+    "zod": "^3.24.2"
   },
   "devDependencies": {
     "typescript": "*"
