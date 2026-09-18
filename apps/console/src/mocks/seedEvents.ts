@@ -178,4 +178,5 @@ export const SEED_EVENTS: Record<string, RunEvent[]> = {
       message: "Execution run terminated with failure status",
     },
   ],
-};
+} as unknown as Record<string, RunEvent[]>;
+

@@ -12,6 +12,7 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
+    "@aegis/contracts": "workspace:*",
     "@aegis/foundation": "workspace:*",
     "@aegis/types": "workspace:*",
     "@tanstack/react-query": "^5.67.1",

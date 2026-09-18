@@ -1,3 +1,5 @@
+import { workerId } from "@aegis/types";
+
 import { eventService } from "../../events/services/eventService";
 import type { Run, RunResult, TaskSummary } from "../types";
 
@@ -175,7 +177,7 @@ class SimulationEngine {
 
       // 2a. Task transition to RUNNING
       const now = new Date().toISOString();
-      const workerName = currentTask.worker ?? `worker-node-${((i % 3) + 1).toString()}`;
+      const workerName = currentTask.worker ?? workerId(`worker-node-${((i % 3) + 1).toString()}`);
 
       currentTask.status = "running";
       currentTask.worker = workerName;

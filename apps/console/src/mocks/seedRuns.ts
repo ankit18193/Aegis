@@ -300,4 +300,5 @@ export const SEED_RUNS: Run[] = [
       },
     ],
   },
-];
+] as unknown as Run[];
+

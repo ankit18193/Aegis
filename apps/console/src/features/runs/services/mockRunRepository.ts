@@ -1,3 +1,5 @@
+import { runId, taskId, workflowId } from "@aegis/types";
+
 import { SEED_RUNS } from "../../../mocks/seedRuns";
 import type { CreateRunInput } from "../schemas/runSchemas";
 import type { Run, RunListItem } from "../types";
@@ -104,7 +106,7 @@ export class MockRunRepository {
     await new Promise((resolve) => { setTimeout(resolve, 25); });
 
     const now = new Date().toISOString();
-    const newId = `run-${Date.now().toString().slice(-4)}`;
+    const newId = runId(`run-${Date.now().toString().slice(-4)}`);
 
     const newRun: Run = {
       id: newId,
@@ -114,32 +116,32 @@ export class MockRunRepository {
       updatedAt: now,
       progress: 0,
       workflow: {
-        id: `wf-${newId}`,
+        id: workflowId(`wf-${newId}`),
         name: "Autonomous Execution Plan",
         tasks: [
           {
-            id: `task-${newId}-1`,
+            id: taskId(`task-${newId}-1`),
             name: "Initial Goal Analysis & Scope",
             status: "pending",
             description: "Parse execution requirements, inspect target boundaries, and sequence tasks.",
             attemptCount: 0,
           },
           {
-            id: `task-${newId}-2`,
+            id: taskId(`task-${newId}-2`),
             name: "Execution Plan Formation",
             status: "pending",
             description: "Generate structured task graph and configure execution parameters.",
             attemptCount: 0,
           },
           {
-            id: `task-${newId}-3`,
+            id: taskId(`task-${newId}-3`),
             name: "Distributed Action Execution",
             status: "pending",
             description: "Execute assigned worker tasks and capture tool outputs.",
             attemptCount: 0,
           },
           {
-            id: `task-${newId}-4`,
+            id: taskId(`task-${newId}-4`),
             name: "Synthesis & Result Verification",
             status: "pending",
             description: "Synthesize findings, verify assertions, and compile final output report.",
@@ -149,28 +151,28 @@ export class MockRunRepository {
       },
       tasks: [
         {
-          id: `task-${newId}-1`,
+          id: taskId(`task-${newId}-1`),
           name: "Initial Goal Analysis & Scope",
           status: "pending",
           description: "Parse execution requirements, inspect target boundaries, and sequence tasks.",
           attemptCount: 0,
         },
         {
-          id: `task-${newId}-2`,
+          id: taskId(`task-${newId}-2`),
           name: "Execution Plan Formation",
           status: "pending",
           description: "Generate structured task graph and configure execution parameters.",
           attemptCount: 0,
         },
         {
-          id: `task-${newId}-3`,
+          id: taskId(`task-${newId}-3`),
           name: "Distributed Action Execution",
           status: "pending",
           description: "Execute assigned worker tasks and capture tool outputs.",
           attemptCount: 0,
         },
         {
-          id: `task-${newId}-4`,
+          id: taskId(`task-${newId}-4`),
           name: "Synthesis & Result Verification",
           status: "pending",
           description: "Synthesize findings, verify assertions, and compile final output report.",

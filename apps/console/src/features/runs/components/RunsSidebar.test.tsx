@@ -1,3 +1,4 @@
+import { runId } from "@aegis/types";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
@@ -10,7 +11,7 @@ import { RunsSidebar } from "./RunsSidebar";
 
 const MOCK_RUNS: RunListItem[] = [
   {
-    id: "run-alpha",
+    id: runId("run-alpha"),
     goal: "Analyze database indexing strategy",
     status: "running",
     progress: 50,
@@ -20,7 +21,7 @@ const MOCK_RUNS: RunListItem[] = [
     updatedAt: new Date().toISOString(),
   },
   {
-    id: "run-beta",
+    id: runId("run-beta"),
     goal: "Audit security boundaries",
     status: "completed",
     progress: 100,

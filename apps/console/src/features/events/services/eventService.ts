@@ -1,3 +1,5 @@
+import { eventId, runId as toRunId } from "@aegis/types";
+
 import { SEED_EVENTS } from "../../../mocks/seedEvents";
 import type { RunEvent } from "../types";
 
@@ -88,8 +90,8 @@ class MockEventRepository {
     const existing = this.eventsByRunId.get(runId) ?? [];
     const newEvent: RunEvent = {
       ...eventData,
-      id: `ev-${Date.now().toString()}-${Math.floor(Math.random() * 1000).toString()}`,
-      runId,
+      id: eventId(`ev-${Date.now().toString()}-${Math.floor(Math.random() * 1000).toString()}`),
+      runId: toRunId(runId),
     };
 
     existing.push(newEvent);
