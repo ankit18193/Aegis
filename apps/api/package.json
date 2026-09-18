@@ -11,6 +11,7 @@
     "clean": "rm -rf dist *.tsbuildinfo",
     "dev": "node --import tsx/esm src/main.ts",
     "start": "node dist/main.js",
+    "test": "vitest run",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
@@ -18,7 +19,9 @@
     "@aegis/contracts": "workspace:*",
     "@aegis/foundation": "workspace:*",
     "@aegis/logger": "workspace:*",
-    "@aegis/types": "workspace:*"
+    "@aegis/types": "workspace:*",
+    "@fastify/cors": "^11.3.0",
+    "fastify": "^5.12.5"
   },
   "devDependencies": {
     "tsx": "^4.0.0",

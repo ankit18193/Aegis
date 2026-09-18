@@ -12,8 +12,8 @@ export default defineConfig({
       ["apps/console/**", "jsdom"],
       ["packages/**", "node"],
     ],
-    setupFiles: ["./apps/console/src/test/setup.ts"],
-    include: ["packages/**/src/**/*.test.ts", "apps/**/src/**/*.test.{ts,tsx}"],
+    setupFiles: [resolve(__dirname, "apps/console/src/test/setup.ts")],
+    include: ["packages/**/src/**/*.test.ts", "apps/**/src/**/*.test.{ts,tsx}", "src/**/*.test.{ts,tsx}"],
     exclude: ["**/node_modules/**", "**/dist/**"],
     coverage: {
       provider: "v8",
