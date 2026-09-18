@@ -89,6 +89,8 @@ const validationErr = formatZodError(zodError, "trace-abc-123");
 
 Recognized error codes:
 * `BAD_REQUEST`
+* `UNAUTHORIZED`
+* `FORBIDDEN`
 * `VALIDATION_ERROR`
 * `NOT_FOUND`
 * `CONFLICT`

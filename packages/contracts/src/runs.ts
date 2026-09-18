@@ -53,7 +53,7 @@ export const VALID_RUN_TRANSITIONS: Readonly<Record<RunStatus, readonly RunStatu
  */
 export const VALID_TASK_TRANSITIONS: Readonly<Record<TaskStatus, readonly TaskStatus[]>> = {
   pending: ["queued", "cancelled"],
-  queued: ["running", "cancelled"],
+  queued: ["running", "failed", "cancelled"],
   running: ["completed", "failed", "retrying", "cancelled"],
   retrying: ["queued", "running", "failed", "cancelled"],
   completed: [],

@@ -67,6 +67,8 @@ describe("Runs & Tasks Contract Schemas", () => {
     it("allows legal task transitions including retries", () => {
       expect(isValidTaskTransition("pending", "queued")).toBe(true);
       expect(isValidTaskTransition("queued", "running")).toBe(true);
+      expect(isValidTaskTransition("queued", "failed")).toBe(true);
+      expect(isValidTaskTransition("queued", "cancelled")).toBe(true);
       expect(isValidTaskTransition("running", "retrying")).toBe(true);
       expect(isValidTaskTransition("retrying", "queued")).toBe(true);
       expect(isValidTaskTransition("retrying", "running")).toBe(true);

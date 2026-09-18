@@ -13,6 +13,8 @@ describe("API Error Contracts & Envelope Helpers", () => {
     it("validates recognized error codes", () => {
       const codes = [
         "BAD_REQUEST",
+        "UNAUTHORIZED",
+        "FORBIDDEN",
         "VALIDATION_ERROR",
         "NOT_FOUND",
         "CONFLICT",

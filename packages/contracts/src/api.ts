@@ -31,7 +31,7 @@ export type GetRunResponse = z.infer<typeof getRunResponseSchema>;
 
 export const listRunsQuerySchema = z.object({
   status: runStatusSchema.optional(),
-  limit: z.number().int().min(1).max(100).default(20),
+  limit: z.coerce.number().int().min(1).max(100).default(20),
   cursor: z.string().optional(),
   query: z.string().trim().optional(),
 });
@@ -61,7 +61,7 @@ export type CancelRunResponse = z.infer<typeof cancelRunResponseSchema>;
 export const getRunEventsQuerySchema = z.object({
   severity: eventSeveritySchema.optional(),
   type: eventTypeSchema.optional(),
-  limit: z.number().int().min(1).max(200).default(50),
+  limit: z.coerce.number().int().min(1).max(200).default(50),
   cursor: z.string().optional(),
 });
 export type GetRunEventsQuery = z.infer<typeof getRunEventsQuerySchema>;

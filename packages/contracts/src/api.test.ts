@@ -65,6 +65,11 @@ describe("API Request and Response Contracts", () => {
     it("rejects negative limit", () => {
       expect(() => listRunsQuerySchema.parse({ limit: -5 })).toThrow();
     });
+
+    it("coerces stringified numeric limit from HTTP query parameters", () => {
+      const parsed = listRunsQuerySchema.parse({ limit: "25" });
+      expect(parsed.limit).toBe(25);
+    });
   });
 
   describe("cancelRunRequestSchema", () => {
@@ -95,6 +100,11 @@ describe("API Request and Response Contracts", () => {
 
     it("rejects limit exceeding 200", () => {
       expect(() => getRunEventsQuerySchema.parse({ limit: 250 })).toThrow();
+    });
+
+    it("coerces stringified numeric limit from HTTP query parameters", () => {
+      const parsed = getRunEventsQuerySchema.parse({ limit: "75" });
+      expect(parsed.limit).toBe(75);
     });
   });
 
