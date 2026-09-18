@@ -73,7 +73,7 @@ export const RunWorkspace: React.FC = () => {
       <RunProgress run={run} />
 
       {/* Workspace Main Content */}
-      <div className="flex-1 p-6 space-y-6 max-w-5xl">
+      <div className="flex-1 p-4 sm:p-6 space-y-6 max-w-5xl">
         {/* Run Result Output (when run has finished) */}
         {run.result ? <RunResultView result={run.result} /> : null}
 

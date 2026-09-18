@@ -28,7 +28,7 @@ export const RunHeader: React.FC<RunHeaderProps> = ({ run, actions }) => {
           </div>
 
           <h1
-            className="text-lg md:text-xl font-semibold text-foreground tracking-tight leading-snug break-words"
+            className="text-lg md:text-xl font-semibold text-foreground tracking-tight leading-snug break-words text-pretty"
             data-testid="run-goal-title"
           >
             {run.goal}

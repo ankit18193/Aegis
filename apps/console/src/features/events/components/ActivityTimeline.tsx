@@ -82,7 +82,7 @@ export const ActivityTimeline: React.FC<ActivityTimelineProps> = ({
 
         {/* Severity Filter buttons */}
         <div className="flex items-center gap-1 text-[11px] font-mono">
-          {(["all", "info", "success", "error"] as const).map((sev) => (
+          {(["all", "info", "warn", "success", "error"] as const).map((sev) => (
             <button
               key={sev}
               type="button"
