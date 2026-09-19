@@ -1,7 +1,7 @@
 import type { Run, RunEvent, RunSummary } from "@aegis/contracts";
 import type { RunId } from "@aegis/types";
 
-import type { EventFilterOptions, IRunRepository, RunFilterOptions } from "./runRepository.js";
+import type { EventFilterOptions, FindAllRunsResult, IRunRepository, RunFilterOptions } from "./runRepository.js";
 import { getInitialSeedEvents, getInitialSeedRuns } from "./seeds.js";
 
 export class InMemoryRunRepository implements IRunRepository {
@@ -34,7 +34,7 @@ export class InMemoryRunRepository implements IRunRepository {
     return Promise.resolve(run ? structuredClone(run) : null);
   }
 
-  findAll(options?: RunFilterOptions): Promise<{ items: RunSummary[]; totalCount: number }> {
+  findAll(options?: RunFilterOptions): Promise<FindAllRunsResult> {
     let list = Array.from(this.runs.values());
 
     if (options?.status) {
@@ -60,6 +60,7 @@ export class InMemoryRunRepository implements IRunRepository {
     }
 
     const limit = options?.limit ?? 20;
+    const hasMore = list.length > limit;
     const paginated = list.slice(0, limit);
 
     const items: RunSummary[] = paginated.map((r) => ({
@@ -76,6 +77,7 @@ export class InMemoryRunRepository implements IRunRepository {
     return Promise.resolve({
       items: structuredClone(items),
       totalCount,
+      hasMore,
     });
   }
 

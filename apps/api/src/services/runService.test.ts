@@ -49,13 +49,21 @@ describe("RunApplicationService & InMemoryRunRepository", () => {
       }
     });
 
-    it("respects pagination limit and provides nextCursor", async () => {
-      const result = await service.listRuns({ limit: 2 });
+    it("respects pagination limit and provides nextCursor only when more items exist", async () => {
+      const page1 = await service.listRuns({ limit: 2 });
 
-      expect(result.ok).toBe(true);
-      if (result.ok) {
-        expect(result.value.items.length).toBe(2);
-        expect(result.value.nextCursor).toBe(result.value.items[1]?.id);
+      expect(page1.ok).toBe(true);
+      if (page1.ok) {
+        expect(page1.value.items.length).toBe(2);
+        expect(page1.value.nextCursor).toBe(page1.value.items[1]?.id);
+
+        // Second page fetches remaining 2 items (out of 4 total seeds)
+        const page2 = await service.listRuns({ limit: 2, cursor: page1.value.nextCursor });
+        expect(page2.ok).toBe(true);
+        if (page2.ok) {
+          expect(page2.value.items.length).toBe(2);
+          expect(page2.value.nextCursor).toBeUndefined();
+        }
       }
     });
   });

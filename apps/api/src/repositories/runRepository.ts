@@ -22,9 +22,15 @@ export interface EventFilterOptions {
   cursor?: string | undefined;
 }
 
+export interface FindAllRunsResult {
+  items: RunSummary[];
+  totalCount: number;
+  hasMore?: boolean;
+}
+
 export interface IRunRepository {
   findById(id: RunId): Promise<Run | null>;
-  findAll(options?: RunFilterOptions): Promise<{ items: RunSummary[]; totalCount: number }>;
+  findAll(options?: RunFilterOptions): Promise<FindAllRunsResult>;
   save(run: Run): Promise<void>;
   findEvents(runId: RunId, options?: EventFilterOptions): Promise<RunEvent[]>;
   saveEvent(event: RunEvent): Promise<void>;

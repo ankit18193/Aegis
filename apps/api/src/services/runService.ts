@@ -39,16 +39,17 @@ export class RunApplicationService {
   ) {}
 
   async listRuns(query?: ListRunsQuery): Promise<Result<ListRunsResponse, ApiErrorResponse>> {
-    const { items, totalCount } = await this.repository.findAll({
+    const { items, totalCount, hasMore } = await this.repository.findAll({
       status: query?.status,
       limit: query?.limit,
       cursor: query?.cursor,
       query: query?.query,
     });
 
-    const nextCursor = items.length > 0 && query?.limit && items.length === query.limit
-      ? items[items.length - 1]?.id
-      : undefined;
+    const nextCursor =
+      hasMore && items.length > 0
+        ? items[items.length - 1]?.id
+        : undefined;
 
     return ok({
       items,
