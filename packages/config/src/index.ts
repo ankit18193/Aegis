@@ -94,3 +94,33 @@ export function loadBaseConfig(): BaseConfig {
     logLevel: optionalEnv("LOG_LEVEL", "info"),
   };
 }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Database config (Phase 5: Persistent State)
+// ─────────────────────────────────────────────────────────────────────────────
+
+export interface DatabaseConfig {
+  readonly url?: string | undefined;
+  readonly poolMin: number;
+  readonly poolMax: number;
+}
+
+/**
+ * Reads database configuration from the environment.
+ * Maps DATABASE_URL, DATABASE_POOL_MIN, and DATABASE_POOL_MAX per .env.example.
+ */
+export function loadDatabaseConfig(): DatabaseConfig {
+  const url = process.env["DATABASE_URL"];
+  const poolMinStr = optionalEnv("DATABASE_POOL_MIN", "2");
+  const poolMaxStr = optionalEnv("DATABASE_POOL_MAX", "10");
+
+  const poolMin = parseInt(poolMinStr, 10);
+  const poolMax = parseInt(poolMaxStr, 10);
+
+  return {
+    url: url && url.trim().length > 0 ? url.trim() : undefined,
+    poolMin: Number.isNaN(poolMin) || poolMin < 1 ? 2 : poolMin,
+    poolMax: Number.isNaN(poolMax) || poolMax < 1 ? 10 : poolMax,
+  };
+}
+
