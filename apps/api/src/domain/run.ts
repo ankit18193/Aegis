@@ -84,7 +84,7 @@ export class ExecutionRun {
     status: RunStatus = "pending",
     readonly createdAt: string = new Date().toISOString(),
     updatedAt: string = createdAt,
-    result?: RunResultSnapshot | undefined,
+    result?: RunResultSnapshot,
   ) {
     this._status = status;
     this._updatedAt = updatedAt;
@@ -231,7 +231,7 @@ export class ExecutionRun {
    * INV-RUN-04: Cannot complete unless all tasks are completed.
    */
   complete(
-    summary?: string | undefined,
+    summary?: string,
     completedAt: string = new Date().toISOString(),
   ): Result<void, DomainError> {
     const check = assertValidRunTransition(this._status, "completed");
@@ -310,7 +310,7 @@ export class ExecutionRun {
    * INV-RUN-06: Non-terminal tasks are cancelled; terminal tasks remain unaffected.
    */
   cancel(
-    reason?: string | undefined,
+    reason?: string,
     cancelledAt: string = new Date().toISOString(),
   ): Result<void, DomainError> {
     const check = assertValidRunTransition(this._status, "cancelled");
@@ -380,7 +380,7 @@ export class ExecutionRun {
    */
   startTask(
     taskId: TaskId,
-    worker?: WorkerId | undefined,
+    worker?: WorkerId,
     startedAt: string = new Date().toISOString(),
   ): Result<void, DomainError> {
     const task = this._tasks.get(taskId);
@@ -412,7 +412,7 @@ export class ExecutionRun {
    */
   completeTask(
     taskId: TaskId,
-    output?: string | undefined,
+    output?: string,
     completedAt: string = new Date().toISOString(),
   ): Result<void, DomainError> {
     const task = this._tasks.get(taskId);

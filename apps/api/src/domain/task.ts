@@ -50,11 +50,11 @@ export class TaskEntity {
     readonly dependencies: readonly TaskId[] = [],
     status: TaskStatus = "pending",
     attemptCount = 0,
-    worker?: WorkerId | undefined,
-    startedAt?: string | undefined,
-    completedAt?: string | undefined,
-    output?: string | undefined,
-    error?: string | undefined,
+    worker?: WorkerId,
+    startedAt?: string,
+    completedAt?: string,
+    output?: string,
+    error?: string,
   ) {
     this._status = status;
     this._attemptCount = attemptCount;
@@ -140,7 +140,7 @@ export class TaskEntity {
    * Transitions task from queued to running.
    */
   start(
-    worker?: WorkerId | undefined,
+    worker?: WorkerId,
     startedAt: string = new Date().toISOString(),
   ): Result<void, DomainError> {
     const check = assertValidTaskTransition(this._status, "running");
@@ -158,7 +158,7 @@ export class TaskEntity {
    * Transitions task from running to completed.
    */
   complete(
-    output?: string | undefined,
+    output?: string,
     completedAt: string = new Date().toISOString(),
   ): Result<void, DomainError> {
     const check = assertValidTaskTransition(this._status, "completed");
@@ -192,7 +192,7 @@ export class TaskEntity {
    * Transitions non-terminal task (pending, queued, or running) to cancelled.
    */
   cancel(
-    reason?: string | undefined,
+    reason?: string,
     completedAt: string = new Date().toISOString(),
   ): Result<void, DomainError> {
     const check = assertValidTaskTransition(this._status, "cancelled");
