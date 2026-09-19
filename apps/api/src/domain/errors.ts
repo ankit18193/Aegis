@@ -84,6 +84,20 @@ export class SelfDependencyError extends DomainError {
 }
 
 /**
+ * Thrown or returned when a task declares duplicate dependencies.
+ */
+export class DuplicateDependencyError extends DomainError {
+  readonly code = "DUPLICATE_DEPENDENCY" as const;
+
+  constructor(
+    readonly taskId: string,
+    readonly dependencyId: string,
+  ) {
+    super(`Task '${taskId}' declares duplicate dependency '${dependencyId}'`);
+  }
+}
+
+/**
  * Thrown or returned when duplicate task IDs are found in a task graph.
  */
 export class DuplicateTaskIdError extends DomainError {
@@ -104,3 +118,4 @@ export class TaskNotFoundError extends DomainError {
     super(`Task '${taskId}' not found in execution run`);
   }
 }
+
