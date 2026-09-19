@@ -3,7 +3,9 @@
  * Validates graph integrity, checks dependencies, detects cycles, and provides topological ordering.
  */
 
-import { ok, err, type Result } from "@aegis/types";
+import type { Result } from "@aegis/types";
+import { err, ok } from "@aegis/types";
+
 import {
   DagCycleError,
   DuplicateDependencyError,
@@ -14,8 +16,7 @@ import {
 
 export interface TaskNode {
   readonly id: string;
-  readonly dependencies?: readonly string[];
-  readonly [key: string]: unknown;
+  readonly dependencies?: readonly string[] | undefined;
 }
 
 export class TaskDag<T extends TaskNode = TaskNode> {
@@ -91,8 +92,8 @@ export class TaskDag<T extends TaskNode = TaskNode> {
           return err(new MissingDependencyError(task.id, depId));
         }
 
-        dependenciesByTaskId.get(task.id)!.push(depId);
-        dependentsByTaskId.get(depId)!.push(task.id);
+        dependenciesByTaskId.get(task.id)?.push(depId);
+        dependentsByTaskId.get(depId)?.push(task.id);
       }
     }
 
@@ -100,7 +101,7 @@ export class TaskDag<T extends TaskNode = TaskNode> {
     const visited = new Set<string>();
     const inStack = new Set<string>();
     const stack: string[] = [];
-    let cyclePath: string[] | null = null;
+    let cyclePath: string[] = [];
 
     function dfs(nodeId: string): boolean {
       visited.add(nodeId);
@@ -129,7 +130,7 @@ export class TaskDag<T extends TaskNode = TaskNode> {
     for (const task of tasks) {
       if (!visited.has(task.id)) {
         if (dfs(task.id)) {
-          return err(new DagCycleError(cyclePath!));
+          return err(new DagCycleError(cyclePath.length > 0 ? cyclePath : [task.id]));
         }
       }
     }
@@ -139,7 +140,7 @@ export class TaskDag<T extends TaskNode = TaskNode> {
     const readyQueue: T[] = [];
 
     for (const task of tasks) {
-      const prereqs = dependenciesByTaskId.get(task.id)!.length;
+      const prereqs = dependenciesByTaskId.get(task.id)?.length ?? 0;
       prereqCounts.set(task.id, prereqs);
       if (prereqs === 0) {
         readyQueue.push(task);
@@ -148,15 +149,21 @@ export class TaskDag<T extends TaskNode = TaskNode> {
 
     const topologicalOrder: T[] = [];
     while (readyQueue.length > 0) {
-      const current = readyQueue.shift()!;
+      const current = readyQueue.shift();
+      if (!current) {
+        break;
+      }
       topologicalOrder.push(current);
 
       const dependents = dependentsByTaskId.get(current.id) ?? [];
       for (const dependentId of dependents) {
-        const remaining = prereqCounts.get(dependentId)! - 1;
+        const remaining = (prereqCounts.get(dependentId) ?? 1) - 1;
         prereqCounts.set(dependentId, remaining);
         if (remaining === 0) {
-          readyQueue.push(tasksById.get(dependentId)!);
+          const dependentTask = tasksById.get(dependentId);
+          if (dependentTask) {
+            readyQueue.push(dependentTask);
+          }
         }
       }
     }

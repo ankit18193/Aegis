@@ -3,56 +3,58 @@
  * Encapsulates lifecycle transitions, terminal immutability, and state snapshotting.
  */
 
-import { ok, type Result, type TaskId, type WorkerId } from "@aegis/types";
+import type { Result, TaskId, WorkerId } from "@aegis/types";
+import { ok } from "@aegis/types";
+
+import type { DomainError } from "./errors.js";
 import {
   assertValidTaskTransition,
   isTerminalTaskStatus,
-  type TaskStatus,
 } from "./lifecycle.js";
-import type { DomainError } from "./errors.js";
+import type { TaskStatus } from "./lifecycle.js";
 
 export interface TaskSnapshot {
   readonly id: TaskId;
   readonly name: string;
   readonly status: TaskStatus;
-  readonly description?: string;
-  readonly worker?: WorkerId;
-  readonly startedAt?: string;
-  readonly completedAt?: string;
+  readonly description?: string | undefined;
+  readonly worker?: WorkerId | undefined;
+  readonly startedAt?: string | undefined;
+  readonly completedAt?: string | undefined;
   readonly attemptCount: number;
-  readonly output?: string;
-  readonly error?: string;
-  readonly dependencies?: readonly TaskId[];
+  readonly output?: string | undefined;
+  readonly error?: string | undefined;
+  readonly dependencies?: readonly TaskId[] | undefined;
 }
 
 export interface CreateTaskProps {
   readonly id: TaskId;
   readonly name: string;
-  readonly description?: string;
-  readonly dependencies?: readonly TaskId[];
+  readonly description?: string | undefined;
+  readonly dependencies?: readonly TaskId[] | undefined;
 }
 
 export class TaskEntity {
   private _status: TaskStatus;
-  private _worker?: WorkerId;
-  private _startedAt?: string;
-  private _completedAt?: string;
+  private _worker?: WorkerId | undefined;
+  private _startedAt?: string | undefined;
+  private _completedAt?: string | undefined;
   private _attemptCount: number;
-  private _output?: string;
-  private _error?: string;
+  private _output?: string | undefined;
+  private _error?: string | undefined;
 
   constructor(
     readonly id: TaskId,
     readonly name: string,
-    readonly description: string = "",
+    readonly description = "",
     readonly dependencies: readonly TaskId[] = [],
     status: TaskStatus = "pending",
-    attemptCount: number = 0,
-    worker?: WorkerId,
-    startedAt?: string,
-    completedAt?: string,
-    output?: string,
-    error?: string,
+    attemptCount = 0,
+    worker?: WorkerId | undefined,
+    startedAt?: string | undefined,
+    completedAt?: string | undefined,
+    output?: string | undefined,
+    error?: string | undefined,
   ) {
     this._status = status;
     this._attemptCount = attemptCount;
@@ -81,7 +83,7 @@ export class TaskEntity {
       snapshot.description ?? "",
       snapshot.dependencies ?? [],
       snapshot.status,
-      snapshot.attemptCount ?? 0,
+      snapshot.attemptCount,
       snapshot.worker,
       snapshot.startedAt,
       snapshot.completedAt,
@@ -138,7 +140,7 @@ export class TaskEntity {
    * Transitions task from queued to running.
    */
   start(
-    worker?: WorkerId,
+    worker?: WorkerId | undefined,
     startedAt: string = new Date().toISOString(),
   ): Result<void, DomainError> {
     const check = assertValidTaskTransition(this._status, "running");
@@ -156,7 +158,7 @@ export class TaskEntity {
    * Transitions task from running to completed.
    */
   complete(
-    output?: string,
+    output?: string | undefined,
     completedAt: string = new Date().toISOString(),
   ): Result<void, DomainError> {
     const check = assertValidTaskTransition(this._status, "completed");
@@ -190,7 +192,7 @@ export class TaskEntity {
    * Transitions non-terminal task (pending, queued, or running) to cancelled.
    */
   cancel(
-    reason?: string,
+    reason?: string | undefined,
     completedAt: string = new Date().toISOString(),
   ): Result<void, DomainError> {
     const check = assertValidTaskTransition(this._status, "cancelled");

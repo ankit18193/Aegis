@@ -1,5 +1,5 @@
-import { describe, it, expect } from "vitest";
-import { TaskDag, type TaskNode } from "./taskDag.js";
+import { describe, expect, it } from "vitest";
+
 import {
   DagCycleError,
   DuplicateDependencyError,
@@ -7,6 +7,9 @@ import {
   MissingDependencyError,
   SelfDependencyError,
 } from "./errors.js";
+import { TaskDag } from "./taskDag.js";
+import type { TaskNode } from "./taskDag.js";
+
 
 describe("TaskDag (Directed Acyclic Graph)", () => {
   describe("Validation & Integrity Invariants", () => {
@@ -176,13 +179,17 @@ describe("TaskDag (Directed Acyclic Graph)", () => {
         { id: "t2", dependencies: ["t1"] },
       ];
 
-      const dag = TaskDag.build(tasks).value!;
-      expect(dag.hasTask("t1")).toBe(true);
-      expect(dag.hasTask("t2")).toBe(true);
-      expect(dag.hasTask("t3")).toBe(false);
-      expect(dag.getTask("t1")?.id).toBe("t1");
-      expect(dag.getTask("t3")).toBeUndefined();
-      expect(dag.getTasks()).toHaveLength(2);
+      const buildResult = TaskDag.build(tasks);
+      expect(buildResult.ok).toBe(true);
+      if (buildResult.ok) {
+        const dag = buildResult.value;
+        expect(dag.hasTask("t1")).toBe(true);
+        expect(dag.hasTask("t2")).toBe(true);
+        expect(dag.hasTask("t3")).toBe(false);
+        expect(dag.getTask("t1")?.id).toBe("t1");
+        expect(dag.getTask("t3")).toBeUndefined();
+        expect(dag.getTasks()).toHaveLength(2);
+      }
     });
   });
 });

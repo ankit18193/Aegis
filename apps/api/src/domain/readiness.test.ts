@@ -1,8 +1,10 @@
-import { describe, it, expect } from "vitest";
 import { taskId } from "@aegis/types";
-import { TaskEntity } from "./task.js";
-import { evaluateTaskReadiness } from "./readiness.js";
+import { describe, expect, it } from "vitest";
+
 import { InvalidStateTransitionError, TerminalStateError } from "./errors.js";
+import { evaluateTaskReadiness } from "./readiness.js";
+import { TaskEntity } from "./task.js";
+
 
 describe("TaskEntity & Pure Task Readiness Engine", () => {
   describe("TaskEntity Lifecycle", () => {

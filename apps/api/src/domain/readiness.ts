@@ -5,6 +5,7 @@
  */
 
 import type { TaskId } from "@aegis/types";
+
 import type { TaskEntity } from "./task.js";
 
 export type ReadinessClassification = "ready" | "waiting" | "blocked";
@@ -43,7 +44,7 @@ export function evaluateTaskReadiness(
       continue;
     }
 
-    if (!task.dependencies || task.dependencies.length === 0) {
+    if (task.dependencies.length === 0) {
       readyTasks.push(task);
       continue;
     }

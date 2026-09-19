@@ -1,36 +1,38 @@
-import {
-  createApiError,
-  isValidRunTransition,
-  type ApiErrorResponse,
-  type CancelRunRequest,
-  type CancelRunResponse,
-  type CreateRunRequest,
-  type CreateRunResponse,
-  type GetRunEventsQuery,
-  type GetRunEventsResponse,
-  type GetRunResponse,
-  type ListRunsQuery,
-  type ListRunsResponse,
-  type Run,
-  type RunEvent,
-  type Task,
+import type {
+  ApiErrorResponse,
+  CancelRunRequest,
+  CancelRunResponse,
+  CreateRunRequest,
+  CreateRunResponse,
+  GetRunEventsQuery,
+  GetRunEventsResponse,
+  GetRunResponse,
+  ListRunsQuery,
+  ListRunsResponse,
 } from "@aegis/contracts";
+import { createApiError } from "@aegis/contracts";
 import type { Logger } from "@aegis/logger";
+import type { Result, RunId } from "@aegis/types";
 import {
   err,
-  eventId,
   ok,
   runId as toRunId,
   taskId,
   workflowId,
-  type Result,
-  type RunId,
 } from "@aegis/types";
 
+import { ExecutionRun } from "../domain/run.js";
+import { TaskEntity } from "../domain/task.js";
 import type { IRunRepository } from "../repositories/runRepository.js";
 
+import {
+  mapDomainEventToRunEvent,
+  mapDtoToRunSnapshot,
+  mapSnapshotToRunDto,
+} from "./runMapper.js";
+
+
 let runSequence = 100;
-let eventSequence = 500;
 
 export class RunApplicationService {
   constructor(
@@ -75,138 +77,103 @@ export class RunApplicationService {
     const newId = toRunId(`run-${Date.now().toString().slice(-4)}-${runSequence.toString()}`);
     const wfId = workflowId(`wf-${newId}`);
 
-    const defaultTasks: Task[] = [
-      {
+    const defaultTasks: TaskEntity[] = [
+      TaskEntity.create({
         id: taskId(`task-${newId}-1`),
         name: "Initial Goal Analysis & Scope",
-        status: "pending",
         description: "Parse execution requirements, inspect target boundaries, and sequence tasks.",
-        attemptCount: 0,
-      },
-      {
+      }),
+      TaskEntity.create({
         id: taskId(`task-${newId}-2`),
         name: "Execution Plan Formation",
-        status: "pending",
         description: "Generate structured task graph and configure execution parameters.",
-        attemptCount: 0,
-      },
-      {
+        dependencies: [taskId(`task-${newId}-1`)],
+      }),
+      TaskEntity.create({
         id: taskId(`task-${newId}-3`),
         name: "Distributed Action Execution",
-        status: "pending",
         description: "Execute assigned worker tasks and capture tool outputs.",
-        attemptCount: 0,
-      },
-      {
+        dependencies: [taskId(`task-${newId}-2`)],
+      }),
+      TaskEntity.create({
         id: taskId(`task-${newId}-4`),
         name: "Synthesis & Result Verification",
-        status: "pending",
         description: "Synthesize findings, verify assertions, and compile final output report.",
-        attemptCount: 0,
-      },
+        dependencies: [taskId(`task-${newId}-3`)],
+      }),
     ];
 
-    const run: Run = {
+    const runResult = ExecutionRun.create({
       id: newId,
       goal: request.goal.trim(),
-      status: "pending",
-      createdAt: now,
-      updatedAt: now,
-      progress: 0,
       workflow: {
         id: request.workflowTemplateId ?? wfId,
         name: "Autonomous Execution Plan",
-        tasks: defaultTasks,
       },
       tasks: defaultTasks,
-    };
-
-    await this.repository.save(run);
-
-    eventSequence += 1;
-    const initialEvent: RunEvent = {
-      id: eventId(`ev-${Date.now().toString().slice(-4)}-${eventSequence.toString()}`),
-      runId: newId,
-      type: "run_created",
-      severity: "info",
-      timestamp: now,
-      message: `Run created with goal: '${run.goal}'`,
-    };
-
-    await this.repository.saveEvent(initialEvent);
-
-    this.logger?.info("Execution run created", {
-      runId: run.id,
-      goal: run.goal,
-      taskCount: run.tasks.length,
+      createdAt: now,
     });
 
-    return ok({ run });
+    if (!runResult.ok) {
+      return err(createApiError("VALIDATION_ERROR", runResult.error.message));
+    }
+
+    const runAggregate = runResult.value;
+    const runDto = mapSnapshotToRunDto(runAggregate.toSnapshot());
+
+    await this.repository.save(runDto);
+
+    for (const domainEvent of runAggregate.pullEvents()) {
+      await this.repository.saveEvent(mapDomainEventToRunEvent(domainEvent));
+    }
+
+    this.logger?.info("Execution run created", {
+      runId: runDto.id,
+      goal: runDto.goal,
+      taskCount: runDto.tasks.length,
+    });
+
+    return ok({ run: runDto });
   }
 
   async cancelRun(
     id: RunId,
     request?: CancelRunRequest,
   ): Promise<Result<CancelRunResponse, ApiErrorResponse>> {
-    const run = await this.repository.findById(id);
-    if (!run) {
+    const existing = await this.repository.findById(id);
+    if (!existing) {
       return err(
         createApiError("NOT_FOUND", `Execution run with ID '${id}' was not found.`),
       );
     }
 
-    if (!isValidRunTransition(run.status, "cancelled")) {
+    // Reconstitute domain aggregate from snapshot
+    const run = ExecutionRun.reconstitute(mapDtoToRunSnapshot(existing));
+
+    // Execute domain cancel operation (with explicit cascading cancellation)
+    const cancelResult = run.cancel(request?.reason);
+    if (!cancelResult.ok) {
       return err(
         createApiError(
           "CONFLICT",
-          `Cannot cancel run '${id}' with terminal status '${run.status}'.`,
+          `Cannot cancel run '${id}' with terminal status '${existing.status}'.`,
         ),
       );
     }
 
-    const now = new Date().toISOString();
+    const updatedDto = mapSnapshotToRunDto(run.toSnapshot());
+    await this.repository.save(updatedDto);
 
-    // Mark pending, queued, or running tasks as cancelled
-    const updatedTasks = run.tasks.map((task) => {
-      if (task.status === "pending" || task.status === "queued" || task.status === "running") {
-        return { ...task, status: "cancelled" as const };
-      }
-      return task;
-    });
-
-    const updatedRun: Run = {
-      ...run,
-      status: "cancelled",
-      updatedAt: now,
-      tasks: updatedTasks,
-      workflow: {
-        ...run.workflow,
-        tasks: updatedTasks,
-      },
-    };
-
-    await this.repository.save(updatedRun);
-
-    eventSequence += 1;
-    const cancellationEvent: RunEvent = {
-      id: eventId(`ev-${Date.now().toString().slice(-4)}-${eventSequence.toString()}`),
-      runId: id,
-      type: "run_cancelled",
-      severity: "warn",
-      timestamp: now,
-      message: request?.reason
-        ? `Run cancelled by user request: ${request.reason}`
-        : "Run cancelled by user request",
-    };
-
-    await this.repository.saveEvent(cancellationEvent);
+    for (const domainEvent of run.pullEvents()) {
+      await this.repository.saveEvent(mapDomainEventToRunEvent(domainEvent));
+    }
 
     this.logger?.info("Execution run cancelled", {
       runId: id,
       reason: request?.reason,
     });
 
-    return ok({ run: updatedRun });
+    return ok({ run: updatedDto });
   }
 
   async getRunEvents(

@@ -1,15 +1,15 @@
-import { describe, it, expect } from "vitest";
-import {
-  canTransitionRun,
-  isTerminalRunStatus,
-  assertValidRunTransition,
-  canTransitionTask,
-  isTerminalTaskStatus,
-  assertValidTaskTransition,
-  type RunStatus,
-  type TaskStatus,
-} from "./lifecycle.js";
+import { describe, expect, it } from "vitest";
+
 import { InvalidStateTransitionError, TerminalStateError } from "./errors.js";
+import {
+  assertValidRunTransition,
+  assertValidTaskTransition,
+  canTransitionRun,
+  canTransitionTask,
+  isTerminalRunStatus,
+  isTerminalTaskStatus,
+} from "./lifecycle.js";
+import type { RunStatus, TaskStatus } from "./lifecycle.js";
 
 describe("Domain Lifecycle State Machines", () => {
   describe("Run Lifecycle", () => {

@@ -4,29 +4,20 @@
  * explicit cascading cancellation, and domain event collection.
  */
 
-import {
-  ok,
-  err,
-  type Result,
-  type RunId,
-  type WorkflowId,
-  type TaskId,
-  type WorkerId,
-} from "@aegis/types";
-import {
-  assertValidRunTransition,
-  isTerminalRunStatus,
-  type RunStatus,
-} from "./lifecycle.js";
-import {
-  type DomainError,
-  InvalidStateTransitionError,
-  TaskNotFoundError,
-  TerminalStateError,
-} from "./errors.js";
-import { TaskEntity, type TaskSnapshot } from "./task.js";
-import { TaskDag } from "./taskDag.js";
+import type { Result, RunId, TaskId, WorkerId, WorkflowId } from "@aegis/types";
+import { err, ok } from "@aegis/types";
+
+import type { DomainError } from "./errors.js";
+import { InvalidStateTransitionError, TaskNotFoundError } from "./errors.js";
 import type { DomainEvent } from "./events.js";
+import type { RunStatus } from "./lifecycle.js";
+import { assertValidRunTransition, isTerminalRunStatus } from "./lifecycle.js";
+import type { TaskSnapshot } from "./task.js";
+import { TaskEntity } from "./task.js";
+import { TaskDag } from "./taskDag.js";
+
+export type { TaskSnapshot } from "./task.js";
+
 
 export interface WorkflowSpec {
   readonly id: WorkflowId;
@@ -37,7 +28,7 @@ export interface RunArtifactSnapshot {
   readonly name: string;
   readonly type: string;
   readonly path: string;
-  readonly sizeBytes?: number;
+  readonly sizeBytes?: number | undefined;
 }
 
 export interface RunMetricsSnapshot {
@@ -49,9 +40,9 @@ export interface RunMetricsSnapshot {
 
 export interface RunResultSnapshot {
   readonly summary: string;
-  readonly reportMarkdown?: string;
-  readonly metrics?: RunMetricsSnapshot;
-  readonly artifacts?: readonly RunArtifactSnapshot[];
+  readonly reportMarkdown?: string | undefined;
+  readonly metrics?: RunMetricsSnapshot | undefined;
+  readonly artifacts?: readonly RunArtifactSnapshot[] | undefined;
 }
 
 export interface RunSnapshot {
@@ -67,7 +58,7 @@ export interface RunSnapshot {
     readonly tasks: readonly TaskSnapshot[];
   };
   readonly tasks: readonly TaskSnapshot[];
-  readonly result?: RunResultSnapshot;
+  readonly result?: RunResultSnapshot | undefined;
 }
 
 export interface CreateRunProps {
@@ -75,7 +66,7 @@ export interface CreateRunProps {
   readonly goal: string;
   readonly workflow: WorkflowSpec;
   readonly tasks: readonly TaskEntity[];
-  readonly createdAt?: string;
+  readonly createdAt?: string | undefined;
 }
 
 export class ExecutionRun {
@@ -83,7 +74,7 @@ export class ExecutionRun {
   private _updatedAt: string;
   private _tasks: Map<string, TaskEntity>;
   private _events: DomainEvent[] = [];
-  private _result?: RunResultSnapshot;
+  private _result?: RunResultSnapshot | undefined;
 
   private constructor(
     readonly id: RunId,
@@ -93,7 +84,7 @@ export class ExecutionRun {
     status: RunStatus = "pending",
     readonly createdAt: string = new Date().toISOString(),
     updatedAt: string = createdAt,
-    result?: RunResultSnapshot,
+    result?: RunResultSnapshot | undefined,
   ) {
     this._status = status;
     this._updatedAt = updatedAt;
@@ -240,7 +231,7 @@ export class ExecutionRun {
    * INV-RUN-04: Cannot complete unless all tasks are completed.
    */
   complete(
-    summary?: string,
+    summary?: string | undefined,
     completedAt: string = new Date().toISOString(),
   ): Result<void, DomainError> {
     const check = assertValidRunTransition(this._status, "completed");
@@ -257,7 +248,7 @@ export class ExecutionRun {
           "run",
           this._status,
           "completed",
-          `${uncompletedTasks.length} task(s) are not completed`,
+          `${uncompletedTasks.length.toString()} task(s) are not completed`,
         ),
       );
     }
@@ -319,7 +310,7 @@ export class ExecutionRun {
    * INV-RUN-06: Non-terminal tasks are cancelled; terminal tasks remain unaffected.
    */
   cancel(
-    reason?: string,
+    reason?: string | undefined,
     cancelledAt: string = new Date().toISOString(),
   ): Result<void, DomainError> {
     const check = assertValidRunTransition(this._status, "cancelled");
@@ -389,7 +380,7 @@ export class ExecutionRun {
    */
   startTask(
     taskId: TaskId,
-    worker?: WorkerId,
+    worker?: WorkerId | undefined,
     startedAt: string = new Date().toISOString(),
   ): Result<void, DomainError> {
     const task = this._tasks.get(taskId);
@@ -421,7 +412,7 @@ export class ExecutionRun {
    */
   completeTask(
     taskId: TaskId,
-    output?: string,
+    output?: string | undefined,
     completedAt: string = new Date().toISOString(),
   ): Result<void, DomainError> {
     const task = this._tasks.get(taskId);

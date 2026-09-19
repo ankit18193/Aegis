@@ -36,7 +36,7 @@ export interface RunStartedDomainEvent extends BaseDomainEvent {
 
 export interface RunCompletedDomainEvent extends BaseDomainEvent {
   readonly type: "run_completed";
-  readonly summary?: string;
+  readonly summary?: string | undefined;
 }
 
 export interface RunFailedDomainEvent extends BaseDomainEvent {
@@ -46,7 +46,7 @@ export interface RunFailedDomainEvent extends BaseDomainEvent {
 
 export interface RunCancelledDomainEvent extends BaseDomainEvent {
   readonly type: "run_cancelled";
-  readonly reason?: string;
+  readonly reason?: string | undefined;
 }
 
 export interface TaskScheduledDomainEvent extends BaseDomainEvent {
@@ -59,14 +59,14 @@ export interface TaskStartedDomainEvent extends BaseDomainEvent {
   readonly type: "task_started";
   readonly taskId: TaskId;
   readonly taskName: string;
-  readonly worker?: WorkerId;
+  readonly worker?: WorkerId | undefined;
 }
 
 export interface TaskCompletedDomainEvent extends BaseDomainEvent {
   readonly type: "task_completed";
   readonly taskId: TaskId;
   readonly taskName: string;
-  readonly output?: string;
+  readonly output?: string | undefined;
 }
 
 export interface TaskFailedDomainEvent extends BaseDomainEvent {
@@ -80,7 +80,7 @@ export interface TaskCancelledDomainEvent extends BaseDomainEvent {
   readonly type: "task_cancelled";
   readonly taskId: TaskId;
   readonly taskName: string;
-  readonly reason?: string;
+  readonly reason?: string | undefined;
 }
 
 export type DomainEvent =

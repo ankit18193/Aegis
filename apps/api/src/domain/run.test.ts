@@ -1,8 +1,17 @@
-import { describe, it, expect } from "vitest";
-import { runId, taskId, workflowId, workerId } from "@aegis/types";
+import { runId, taskId, workerId, workflowId } from "@aegis/types";
+import { describe, expect, it } from "vitest";
+
+import {
+  DagCycleError,
+  InvalidStateTransitionError,
+  TerminalStateError,
+} from "./errors.js";
+import type {
+  RunCreatedDomainEvent,
+  TaskCancelledDomainEvent,
+} from "./events.js";
 import { ExecutionRun } from "./run.js";
 import { TaskEntity } from "./task.js";
-import { DagCycleError, InvalidStateTransitionError, TerminalStateError } from "./errors.js";
 
 describe("ExecutionRun Aggregate Root", () => {
   function createSampleTasks(): TaskEntity[] {
@@ -13,6 +22,23 @@ describe("ExecutionRun Aggregate Root", () => {
       dependencies: [taskId("t1")],
     });
     return [t1, t2];
+  }
+
+  function createValidRun(
+    goal = "Test run",
+    tasks: TaskEntity[] = createSampleTasks(),
+    id = runId("run-001"),
+  ): ExecutionRun {
+    const res = ExecutionRun.create({
+      id,
+      goal,
+      workflow: { id: workflowId("wf-1"), name: "Workflow" },
+      tasks,
+    });
+    if (!res.ok) {
+      throw new Error(`Failed to create test run: ${res.error.message}`);
+    }
+    return res.value;
   }
 
   describe("Creation and Invariant Validation", () => {
@@ -36,7 +62,8 @@ describe("ExecutionRun Aggregate Root", () => {
         const events = run.pullEvents();
         expect(events).toHaveLength(1);
         expect(events[0]?.type).toBe("run_created");
-        expect((events[0] as any).taskCount).toBe(2);
+        const createdEvent = events[0] as RunCreatedDomainEvent;
+        expect(createdEvent.taskCount).toBe(2);
 
         // Pulling again returns empty buffer
         expect(run.pullEvents()).toHaveLength(0);
@@ -44,8 +71,16 @@ describe("ExecutionRun Aggregate Root", () => {
     });
 
     it("rejects run creation if tasks contain a cycle", () => {
-      const t1 = TaskEntity.create({ id: taskId("t1"), name: "Task 1", dependencies: [taskId("t2")] });
-      const t2 = TaskEntity.create({ id: taskId("t2"), name: "Task 2", dependencies: [taskId("t1")] });
+      const t1 = TaskEntity.create({
+        id: taskId("t1"),
+        name: "Task 1",
+        dependencies: [taskId("t2")],
+      });
+      const t2 = TaskEntity.create({
+        id: taskId("t2"),
+        name: "Task 2",
+        dependencies: [taskId("t1")],
+      });
 
       const runResult = ExecutionRun.create({
         id: runId("run-cycle"),
@@ -63,12 +98,7 @@ describe("ExecutionRun Aggregate Root", () => {
 
   describe("Lifecycle State Transitions", () => {
     it("transitions pending -> running and emits run_started event", () => {
-      const run = ExecutionRun.create({
-        id: runId("run-001"),
-        goal: "Test run",
-        workflow: { id: workflowId("wf-1"), name: "Workflow" },
-        tasks: createSampleTasks(),
-      }).value!;
+      const run = createValidRun();
 
       const startRes = run.start();
       expect(startRes.ok).toBe(true);
@@ -79,12 +109,7 @@ describe("ExecutionRun Aggregate Root", () => {
     });
 
     it("enforces INV-RUN-04: rejects completion when tasks are uncompleted", () => {
-      const run = ExecutionRun.create({
-        id: runId("run-001"),
-        goal: "Test run",
-        workflow: { id: workflowId("wf-1"), name: "Workflow" },
-        tasks: createSampleTasks(),
-      }).value!;
+      const run = createValidRun();
 
       run.start();
       const compRes = run.complete("Premature finish");
@@ -98,12 +123,7 @@ describe("ExecutionRun Aggregate Root", () => {
 
     it("completes run when all tasks are completed and sets progress to 100%", () => {
       const t1 = TaskEntity.create({ id: taskId("t1"), name: "Task 1" });
-      const run = ExecutionRun.create({
-        id: runId("run-001"),
-        goal: "Test run",
-        workflow: { id: workflowId("wf-1"), name: "Workflow" },
-        tasks: [t1],
-      }).value!;
+      const run = createValidRun("Test run", [t1]);
 
       run.start();
       run.scheduleTask(taskId("t1"));
@@ -124,12 +144,7 @@ describe("ExecutionRun Aggregate Root", () => {
       const t2 = TaskEntity.create({ id: taskId("t2"), name: "Task 2" });
       const t3 = TaskEntity.create({ id: taskId("t3"), name: "Task 3" });
 
-      const run = ExecutionRun.create({
-        id: runId("run-cascade"),
-        goal: "Cascade test",
-        workflow: { id: workflowId("wf-1"), name: "Workflow" },
-        tasks: [t1, t2, t3],
-      }).value!;
+      const run = createValidRun("Cascade test", [t1, t2, t3], runId("run-cascade"));
 
       run.start();
       // t1: completed before cancel
@@ -154,20 +169,17 @@ describe("ExecutionRun Aggregate Root", () => {
       expect(run.getTask("t3")?.status).toBe("cancelled"); // Pending task was cancelled
 
       const events = run.pullEvents();
-      const taskCancelledEvents = events.filter((e) => e.type === "task_cancelled");
+      const taskCancelledEvents = events.filter(
+        (e): e is TaskCancelledDomainEvent => e.type === "task_cancelled",
+      );
       expect(taskCancelledEvents).toHaveLength(2);
-      expect(taskCancelledEvents.map((e: any) => e.taskId)).toContain("t2");
-      expect(taskCancelledEvents.map((e: any) => e.taskId)).toContain("t3");
+      expect(taskCancelledEvents.map((e) => e.taskId)).toContain("t2");
+      expect(taskCancelledEvents.map((e) => e.taskId)).toContain("t3");
       expect(events.some((e) => e.type === "run_cancelled")).toBe(true);
     });
 
     it("enforces INV-RUN-03: terminal run immutability with TerminalStateError", () => {
-      const run = ExecutionRun.create({
-        id: runId("run-term"),
-        goal: "Terminal test",
-        workflow: { id: workflowId("wf-1"), name: "Workflow" },
-        tasks: [],
-      }).value!;
+      const run = createValidRun("Terminal test", [], runId("run-term"));
 
       run.start();
       run.complete();
@@ -184,12 +196,7 @@ describe("ExecutionRun Aggregate Root", () => {
   describe("Snapshot & Reconstitution", () => {
     it("serializes to snapshot and reconstitutes faithfully", () => {
       const tasks = createSampleTasks();
-      const run = ExecutionRun.create({
-        id: runId("run-reconst"),
-        goal: "Persistence test",
-        workflow: { id: workflowId("wf-1"), name: "Workflow" },
-        tasks,
-      }).value!;
+      const run = createValidRun("Persistence test", tasks, runId("run-reconst"));
 
       run.start();
       run.scheduleTask(taskId("t1"));

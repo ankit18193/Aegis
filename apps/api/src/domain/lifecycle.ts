@@ -3,7 +3,9 @@
  * Enforces canonical transitions and terminal state immutability.
  */
 
-import { ok, err, type Result } from "@aegis/types";
+import type { Result } from "@aegis/types";
+import { err, ok } from "@aegis/types";
+
 import { InvalidStateTransitionError, TerminalStateError } from "./errors.js";
 
 // ─────────────────────────────────────────────────────────────────────────────
