@@ -19,6 +19,7 @@ const config = [
       "eslint.config.mjs",
       "vitest.config.ts",
       "**/vite.config.ts",
+      "**/drizzle.config.ts",
       "**/postcss.config.js",
       "**/tailwind.config.js",
       ".antigravity/**",
