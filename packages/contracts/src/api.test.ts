@@ -156,7 +156,7 @@ describe("API Request and Response Contracts", () => {
       expect(res.nextCursor).toBe("next-token-abc");
     });
 
-    it("parses getRunEventsResponseSchema", () => {
+    it("parses getRunEventsResponseSchema with task_cancelled event", () => {
       const res = getRunEventsResponseSchema.parse({
         events: [
           {
@@ -167,10 +167,19 @@ describe("API Request and Response Contracts", () => {
             timestamp: "2026-09-18T10:00:00.000Z",
             message: "Run created",
           },
+          {
+            id: "evt-02",
+            runId: "run-999",
+            type: "task_cancelled",
+            severity: "warn",
+            timestamp: "2026-09-18T10:01:00.000Z",
+            message: "Task cancelled by run cancellation",
+            taskId: "task-1",
+          },
         ],
       });
-      expect(res.events).toHaveLength(1);
-      expect(res.events[0]?.type).toBe("run_created");
+      expect(res.events).toHaveLength(2);
+      expect(res.events[1]?.type).toBe("task_cancelled");
     });
   });
 });
