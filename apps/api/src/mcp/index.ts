@@ -9,3 +9,4 @@ export * from "./schema.js";
 export * from "./client.js";
 export * from "./lifecycle.js";
 export * from "./adapter.js";
+export * from "./manager.js";
