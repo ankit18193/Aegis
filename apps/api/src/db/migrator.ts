@@ -3,6 +3,7 @@
  * Applies schema migrations deterministically from the migrations folder.
  */
 
+import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -18,6 +19,14 @@ export async function runMigrations(
   migrationsFolder?: string,
 ): Promise<void> {
   const currentDir = path.dirname(fileURLToPath(import.meta.url));
-  const folder = migrationsFolder ?? path.resolve(currentDir, "./migrations");
+  let folder = migrationsFolder ?? path.resolve(currentDir, "./migrations");
+
+  if (!fs.existsSync(folder) || !fs.existsSync(path.resolve(folder, "meta/_journal.json"))) {
+    const srcFallback = path.resolve(currentDir, "../../src/db/migrations");
+    if (fs.existsSync(srcFallback) && fs.existsSync(path.resolve(srcFallback, "meta/_journal.json"))) {
+      folder = srcFallback;
+    }
+  }
+
   await migrate(db, { migrationsFolder: folder });
 }
