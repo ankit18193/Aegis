@@ -11,6 +11,7 @@ import { createLogger } from "@aegis/logger";
 import { buildApp } from "./app.js";
 import { loadApiConfig } from "./config/index.js";
 import { createDatabaseContext, type DatabaseContext } from "./db/client.js";
+import { McpProcessRegistry } from "./mcp/lifecycle.js";
 import { InMemoryRunRepository } from "./repositories/inMemoryRunRepository.js";
 import { PostgresRunRepository } from "./repositories/postgresRunRepository.js";
 import type { IRunRepository } from "./repositories/runRepository.js";
@@ -52,6 +53,8 @@ async function main(): Promise<void> {
     databaseContext,
   });
 
+  McpProcessRegistry.getInstance().attachSignalHandlers();
+
   try {
     const address = await app.listen({ port: config.port, host: config.host });
     logger.info(`Aegis API listening at ${address}`, {
@@ -62,6 +65,7 @@ async function main(): Promise<void> {
     logger.error("Failed to start Aegis API server", {
       error: err instanceof Error ? err.message : String(err),
     });
+    McpProcessRegistry.getInstance().detachSignalHandlers();
     if (databaseContext) {
       await databaseContext.close();
     }
@@ -74,6 +78,7 @@ async function main(): Promise<void> {
     process.on(signal, () => {
       logger.info(`Received ${signal}, shutting down gracefully...`);
       void (async () => {
+        McpProcessRegistry.getInstance().detachSignalHandlers();
         await app.close();
         if (databaseContext) {
           await databaseContext.close();

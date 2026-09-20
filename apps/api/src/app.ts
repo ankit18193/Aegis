@@ -4,6 +4,8 @@ import fastify, { type FastifyInstance } from "fastify";
 
 import { loadApiConfig } from "./config/index.js";
 import { createDatabaseContext, type DatabaseContext } from "./db/client.js";
+import { McpClientManager } from "./mcp/manager.js";
+import type { McpServerConfig } from "./mcp/types.js";
 import { registerCorrelationHooks } from "./middleware/correlation.js";
 import { registerErrorHandlers } from "./middleware/errorHandler.js";
 import { InMemoryRunRepository } from "./repositories/inMemoryRunRepository.js";
@@ -25,6 +27,8 @@ export interface BuildAppOptions {
   runService?: AgentRunService | RunApplicationService | undefined;
   databaseContext?: DatabaseContext | undefined;
   toolRegistry?: IToolRegistry | undefined;
+  mcpClientManager?: McpClientManager | undefined;
+  mcpServerConfigs?: readonly McpServerConfig[] | undefined;
 }
 
 /**
@@ -68,18 +72,34 @@ export async function buildApp(options: BuildAppOptions = {}): Promise<FastifyIn
     }
   }
 
+  // Resolve tool registry and register built-in tools
+  const toolRegistry = options.toolRegistry ?? new ToolRegistry();
+  registerBuiltinTools(toolRegistry);
+
+  // Resolve and initialize configured MCP servers
+  let mcpManager = options.mcpClientManager;
+  const mcpConfigs =
+    options.mcpServerConfigs ??
+    (config.nodeEnv !== "test" ? config.mcpServers : undefined);
+
+  if (!mcpManager && mcpConfigs && mcpConfigs.length > 0) {
+    mcpManager = new McpClientManager({
+      registry: toolRegistry,
+      configs: mcpConfigs,
+    });
+    await mcpManager.initialize();
+  }
+
+  if (mcpManager) {
+    app.addHook("onClose", async () => {
+      await mcpManager.close();
+    });
+  }
+
   let runService = options.runService;
   if (!runService) {
-    let actionExecutor: ToolActionExecutor | undefined;
-    if (options.toolRegistry) {
-      const toolExecutor = new ToolExecutor(options.toolRegistry);
-      actionExecutor = new ToolActionExecutor(toolExecutor);
-    } else {
-      const registry = new ToolRegistry();
-      registerBuiltinTools(registry);
-      const toolExecutor = new ToolExecutor(registry);
-      actionExecutor = new ToolActionExecutor(toolExecutor);
-    }
+    const toolExecutor = new ToolExecutor(toolRegistry);
+    const actionExecutor = new ToolActionExecutor(toolExecutor);
 
     runService = new AgentRunService(repository, logger, {
       executor: actionExecutor,

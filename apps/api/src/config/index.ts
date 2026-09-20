@@ -8,6 +8,9 @@ import {
   optionalEnv,
 } from "@aegis/config";
 
+import { validateMcpServerConfigs } from "../mcp/config.js";
+import type { McpServerConfig } from "../mcp/types.js";
+
 export interface ApiServerConfig {
   readonly port: number;
   readonly host: string;
@@ -16,6 +19,26 @@ export interface ApiServerConfig {
   readonly logLevel: string;
   readonly database: DatabaseConfig;
   readonly agent: AgentConfig;
+  readonly mcpServers: readonly McpServerConfig[];
+}
+
+export function loadMcpConfig(): readonly McpServerConfig[] {
+  const raw = optionalEnv("AEGIS_MCP_SERVERS", "");
+  if (!raw) {
+    return [];
+  }
+  try {
+    const parsed = JSON.parse(raw) as unknown;
+    if (Array.isArray(parsed)) {
+      const res = validateMcpServerConfigs(parsed);
+      if (res.ok) {
+        return res.value;
+      }
+    }
+  } catch {
+    // Ignore unparseable JSON in env
+  }
+  return [];
 }
 
 export function loadApiConfig(): ApiServerConfig {
@@ -30,6 +53,7 @@ export function loadApiConfig(): ApiServerConfig {
     logLevel: optionalEnv("LOG_LEVEL", "info"),
     database: loadDatabaseConfig(),
     agent: loadAgentConfig(),
+    mcpServers: loadMcpConfig(),
   };
 }
 
