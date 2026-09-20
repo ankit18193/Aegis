@@ -13,6 +13,7 @@ import type { Transport } from "@modelcontextprotocol/sdk/shared/transport.js";
 
 import { DEFAULT_MCP_TIMEOUT_MS } from "./config.js";
 import { McpError, toMcpError } from "./errors.js";
+import { assertSafeCommand, McpProcessRegistry } from "./lifecycle.js";
 import type {
   IMcpClient,
   McpCallOptions,
@@ -60,6 +61,13 @@ export class McpClient implements IMcpClient {
     return this._status;
   }
 
+  get pid(): number | null {
+    if (this.transport instanceof StdioClientTransport) {
+      return this.transport.pid;
+    }
+    return null;
+  }
+
   async connect(): Promise<void> {
     if (this._status === "connected") {
       return;
@@ -82,6 +90,8 @@ export class McpClient implements IMcpClient {
         if (!this.config.command) {
           throw McpError.invalidConfig(this.serverId, "Command is required for stdio transport");
         }
+
+        assertSafeCommand(this.config.command, this.serverId);
 
         const stdioParams: {
           command: string;
@@ -119,6 +129,7 @@ export class McpClient implements IMcpClient {
 
       await this.client.connect(this.transport);
       this._status = "connected";
+      McpProcessRegistry.getInstance().register(this);
     } catch (err) {
       this._status = "failed";
       if (err instanceof McpError) {
@@ -133,6 +144,8 @@ export class McpClient implements IMcpClient {
   }
 
   async disconnect(): Promise<void> {
+    McpProcessRegistry.getInstance().unregister(this);
+
     if (this._status === "disconnected" && !this.client && !this.transport) {
       return;
     }
