@@ -107,8 +107,13 @@ describe("MCP Stdio Process Lifecycle & Isolation", () => {
     // Call crash tool which triggers process.exit(1)
     await client.callTool("crash", {});
 
-    // Wait briefly for process exit to register on transport
-    await new Promise((resolve) => setTimeout(resolve, 100));
+    // Wait for process exit to register on transport
+    for (let i = 0; i < 20; i++) {
+      if (client.status === "disconnected") {
+        break;
+      }
+      await new Promise((resolve) => setTimeout(resolve, 50));
+    }
 
     expect(client.status).toBe("disconnected");
 

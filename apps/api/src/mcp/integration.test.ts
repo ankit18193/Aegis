@@ -4,16 +4,13 @@ import { fileURLToPath } from "node:url";
 import { ok, runId } from "@aegis/types";
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
-import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { z } from "zod";
 
 import { type ActionDecision, DeterministicPlanner } from "../agent/planner.js";
 import { AgentRuntime } from "../agent/runtime.js";
 import { AgentState } from "../agent/state.js";
-import { createDatabaseContext, type DatabaseContext } from "../db/client.js";
-import { runMigrations } from "../db/migrator.js";
 import { InMemoryRunRepository } from "../repositories/inMemoryRunRepository.js";
-import { PostgresRunRepository } from "../repositories/postgresRunRepository.js";
 import { AgentRunService } from "../services/agentRunService.js";
 import { ToolActionExecutor } from "../tools/adapter.js";
 import { ToolExecutor } from "../tools/executor.js";
@@ -123,31 +120,6 @@ function createHermeticMcpServer() {
 }
 
 describe("MCP & Agent Runtime End-to-End Execution Coverage", () => {
-  let pgCtx: DatabaseContext | undefined;
-  let pgRepo: PostgresRunRepository | undefined;
-
-  beforeAll(async () => {
-    try {
-      pgCtx = createDatabaseContext({
-        url: "postgresql://postgres:postgres@localhost:5433/aegis",
-        poolMin: 1,
-        poolMax: 2,
-      });
-      await runMigrations(pgCtx.db);
-      pgRepo = new PostgresRunRepository(pgCtx);
-    } catch {
-      // PostgreSQL is optional in unit environments; fallback is covered
-      pgCtx = undefined;
-      pgRepo = undefined;
-    }
-  });
-
-  afterAll(async () => {
-    if (pgCtx) {
-      await pgCtx.close();
-    }
-  });
-
   beforeEach(() => {
     McpProcessRegistry.resetInstance();
   });
@@ -540,8 +512,7 @@ describe("MCP & Agent Runtime End-to-End Execution Coverage", () => {
     const toolExecutor = new ToolExecutor(registry);
     const actionExecutor = new ToolActionExecutor(toolExecutor);
 
-    // Test with real Postgres if available, else InMemoryRunRepository
-    const repository = pgRepo ?? new InMemoryRunRepository(true);
+    const repository = new InMemoryRunRepository(true);
 
     const planner = new DeterministicPlanner((state: AgentState) => {
       if (state.iteration === 0) {
