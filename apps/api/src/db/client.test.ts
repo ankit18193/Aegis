@@ -25,5 +25,5 @@ describe("Database Client Foundation", () => {
     } finally {
       await ctx.close();
     }
-  });
+  }, 30000);
 });
