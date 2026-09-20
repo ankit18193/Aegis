@@ -13,6 +13,10 @@ import { registerHealthRoutes } from "./routes/health.js";
 import { registerRunRoutes } from "./routes/runs.js";
 import { AgentRunService } from "./services/agentRunService.js";
 import type { RunApplicationService } from "./services/runService.js";
+import { ToolActionExecutor } from "./tools/adapter.js";
+import { registerBuiltinTools } from "./tools/builtins/index.js";
+import { ToolExecutor } from "./tools/executor.js";
+import { type IToolRegistry, ToolRegistry } from "./tools/registry.js";
 
 export interface BuildAppOptions {
   logger?: Logger | undefined;
@@ -20,6 +24,7 @@ export interface BuildAppOptions {
   runRepository?: IRunRepository | undefined;
   runService?: AgentRunService | RunApplicationService | undefined;
   databaseContext?: DatabaseContext | undefined;
+  toolRegistry?: IToolRegistry | undefined;
 }
 
 /**
@@ -63,11 +68,24 @@ export async function buildApp(options: BuildAppOptions = {}): Promise<FastifyIn
     }
   }
 
-  const runService =
-    options.runService ??
-    new AgentRunService(repository, logger, {
+  let runService = options.runService;
+  if (!runService) {
+    let actionExecutor: ToolActionExecutor | undefined;
+    if (options.toolRegistry) {
+      const toolExecutor = new ToolExecutor(options.toolRegistry);
+      actionExecutor = new ToolActionExecutor(toolExecutor);
+    } else {
+      const registry = new ToolRegistry();
+      registerBuiltinTools(registry);
+      const toolExecutor = new ToolExecutor(registry);
+      actionExecutor = new ToolActionExecutor(toolExecutor);
+    }
+
+    runService = new AgentRunService(repository, logger, {
+      executor: actionExecutor,
       policy: { maxIterations: config.agent.maxIterations },
     });
+  }
 
   // Register health & readiness routes
   registerHealthRoutes(app);

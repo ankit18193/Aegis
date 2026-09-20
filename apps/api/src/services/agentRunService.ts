@@ -28,7 +28,7 @@ import {
   workflowId,
 } from "@aegis/types";
 
-import { DefaultActionExecutor, type IActionExecutor } from "../agent/action.js";
+import type { IActionExecutor } from "../agent/action.js";
 import { DeterministicPlanner, type IPlanner } from "../agent/planner.js";
 import { DEFAULT_EXECUTION_POLICY, type ExecutionPolicy } from "../agent/policy.js";
 import { AgentRuntime } from "../agent/runtime.js";
@@ -36,6 +36,11 @@ import { AgentState } from "../agent/state.js";
 import { ExecutionRun } from "../domain/run.js";
 import { TaskEntity } from "../domain/task.js";
 import type { IRunRepository } from "../repositories/runRepository.js";
+import { ToolActionExecutor } from "../tools/adapter.js";
+import { registerBuiltinTools } from "../tools/builtins/index.js";
+import { ToolExecutor } from "../tools/executor.js";
+import { ToolRegistry } from "../tools/registry.js";
+import { sanitizePayload } from "../tools/safety.js";
 
 import { InProcessExecutionDispatcher, type IExecutionDispatcher } from "./executionDispatcher.js";
 import {
@@ -77,9 +82,7 @@ export class AgentRunService {
             action: {
               name: "echo",
               payload: {
-                step: "init",
-                goal: state.goal,
-                message: "Analyzing goal and formulating execution actions",
+                text: `Analyzing goal: '${state.goal}'`,
               },
             },
           });
@@ -89,7 +92,16 @@ export class AgentRunService {
           summary: `Successfully completed execution for goal: '${state.goal}'`,
         });
       });
-    this.executor = options.executor ?? new DefaultActionExecutor();
+
+    if (options.executor) {
+      this.executor = options.executor;
+    } else {
+      const registry = new ToolRegistry();
+      registerBuiltinTools(registry);
+      const toolExecutor = new ToolExecutor(registry);
+      this.executor = new ToolActionExecutor(toolExecutor);
+    }
+
     this.policy = options.policy ?? DEFAULT_EXECUTION_POLICY;
     this.dispatcher = options.dispatcher ?? new InProcessExecutionDispatcher();
     this.autoExecute = options.autoExecute ?? true;
@@ -293,9 +305,10 @@ export class AgentRunService {
           return;
         }
 
+        const sanitizedInput = sanitizePayload(action.payload);
         run.recordToolInvocation(
           action.name,
-          action.payload,
+          sanitizedInput,
           observation.data,
           observation.error,
           task3Id,
