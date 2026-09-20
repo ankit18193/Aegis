@@ -1,15 +1,19 @@
 /**
  * Aegis API — Application Entry Point
  *
- * Phase 3: API Foundation.
+ * Phase 5: Persistent State.
  * Initializes Fastify HTTP server, registers canonical contract routes,
- * structured logging, CORS, and starts listening on the configured port.
+ * structured logging, CORS, PostgreSQL persistence layer, and lifecycle shutdown.
  */
 
 import { createLogger } from "@aegis/logger";
 
 import { buildApp } from "./app.js";
 import { loadApiConfig } from "./config/index.js";
+import { createDatabaseContext, type DatabaseContext } from "./db/client.js";
+import { InMemoryRunRepository } from "./repositories/inMemoryRunRepository.js";
+import { PostgresRunRepository } from "./repositories/postgresRunRepository.js";
+import type { IRunRepository } from "./repositories/runRepository.js";
 
 async function main(): Promise<void> {
   const config = loadApiConfig();
@@ -19,14 +23,34 @@ async function main(): Promise<void> {
 
   logger.info("Aegis API initializing", {
     version: "0.1.0",
-    phase: "Phase 3 — API Foundation",
+    phase: "Phase 5 — Persistent State",
     port: config.port,
     host: config.host,
     nodeEnv: config.nodeEnv,
     corsOrigin: config.corsOrigin,
+    databaseConfigured: Boolean(config.database.url),
   });
 
-  const app = await buildApp({ logger });
+  let databaseContext: DatabaseContext | undefined;
+  let repository: IRunRepository;
+
+  if (config.database.url) {
+    databaseContext = createDatabaseContext(config.database);
+    repository = new PostgresRunRepository(databaseContext);
+    logger.info("PostgreSQL persistence layer initialized", {
+      poolMin: config.database.poolMin,
+      poolMax: config.database.poolMax,
+    });
+  } else {
+    repository = new InMemoryRunRepository(true);
+    logger.warn("No DATABASE_URL configured; falling back to in-memory repository");
+  }
+
+  const app = await buildApp({
+    logger,
+    runRepository: repository,
+    databaseContext,
+  });
 
   try {
     const address = await app.listen({ port: config.port, host: config.host });
@@ -38,6 +62,9 @@ async function main(): Promise<void> {
     logger.error("Failed to start Aegis API server", {
       error: err instanceof Error ? err.message : String(err),
     });
+    if (databaseContext) {
+      await databaseContext.close();
+    }
     process.exit(1);
   }
 
@@ -46,12 +73,17 @@ async function main(): Promise<void> {
   for (const signal of signals) {
     process.on(signal, () => {
       logger.info(`Received ${signal}, shutting down gracefully...`);
-      void app.close().then(() => {
+      void (async () => {
+        await app.close();
+        if (databaseContext) {
+          await databaseContext.close();
+        }
         logger.info("Aegis API closed successfully");
         process.exit(0);
-      });
+      })();
     });
   }
 }
 
 void main();
+

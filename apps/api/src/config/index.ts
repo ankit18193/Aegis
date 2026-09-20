@@ -1,4 +1,10 @@
-import { getNodeEnv, type NodeEnv, optionalEnv } from "@aegis/config";
+import {
+  getNodeEnv,
+  loadDatabaseConfig,
+  type DatabaseConfig,
+  type NodeEnv,
+  optionalEnv,
+} from "@aegis/config";
 
 export interface ApiServerConfig {
   readonly port: number;
@@ -6,6 +12,7 @@ export interface ApiServerConfig {
   readonly corsOrigin: string;
   readonly nodeEnv: NodeEnv;
   readonly logLevel: string;
+  readonly database: DatabaseConfig;
 }
 
 export function loadApiConfig(): ApiServerConfig {
@@ -18,5 +25,7 @@ export function loadApiConfig(): ApiServerConfig {
     corsOrigin: optionalEnv("CORS_ORIGIN", "http://localhost:3000"),
     nodeEnv: getNodeEnv(),
     logLevel: optionalEnv("LOG_LEVEL", "info"),
+    database: loadDatabaseConfig(),
   };
 }
+

@@ -3,19 +3,22 @@ import cors from "@fastify/cors";
 import fastify, { type FastifyInstance } from "fastify";
 
 import { loadApiConfig } from "./config/index.js";
+import { createDatabaseContext, type DatabaseContext } from "./db/client.js";
 import { registerCorrelationHooks } from "./middleware/correlation.js";
 import { registerErrorHandlers } from "./middleware/errorHandler.js";
 import { InMemoryRunRepository } from "./repositories/inMemoryRunRepository.js";
+import { PostgresRunRepository } from "./repositories/postgresRunRepository.js";
 import type { IRunRepository } from "./repositories/runRepository.js";
 import { registerHealthRoutes } from "./routes/health.js";
 import { registerRunRoutes } from "./routes/runs.js";
 import { RunApplicationService } from "./services/runService.js";
 
 export interface BuildAppOptions {
-  logger?: Logger;
-  corsOrigin?: string | string[];
-  runRepository?: IRunRepository;
-  runService?: RunApplicationService;
+  logger?: Logger | undefined;
+  corsOrigin?: string | string[] | undefined;
+  runRepository?: IRunRepository | undefined;
+  runService?: RunApplicationService | undefined;
+  databaseContext?: DatabaseContext | undefined;
 }
 
 /**
@@ -47,7 +50,18 @@ export async function buildApp(options: BuildAppOptions = {}): Promise<FastifyIn
   registerErrorHandlers(app, logger);
 
   // Resolve repository & service dependencies
-  const repository = options.runRepository ?? new InMemoryRunRepository(true);
+  let repository = options.runRepository;
+  if (!repository) {
+    if (options.databaseContext) {
+      repository = new PostgresRunRepository(options.databaseContext);
+    } else if (config.nodeEnv !== "test" && config.database.url) {
+      const dbContext = createDatabaseContext(config.database);
+      repository = new PostgresRunRepository(dbContext);
+    } else {
+      repository = new InMemoryRunRepository(true);
+    }
+  }
+
   const runService = options.runService ?? new RunApplicationService(repository, logger);
 
   // Register health & readiness routes
