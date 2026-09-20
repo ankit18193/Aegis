@@ -9,9 +9,13 @@ import {
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 
 import { statusFromErrorCode } from "../middleware/errorHandler.js";
+import type { AgentRunService } from "../services/agentRunService.js";
 import type { RunApplicationService } from "../services/runService.js";
 
-export function registerRunRoutes(app: FastifyInstance, service: RunApplicationService): void {
+export function registerRunRoutes(
+  app: FastifyInstance,
+  service: RunApplicationService | AgentRunService,
+): void {
   // POST /runs — Submit a new execution run
   app.post("/runs", async (request: FastifyRequest, reply: FastifyReply) => {
     const traceId = request.requestId;

@@ -11,13 +11,14 @@ import { PostgresRunRepository } from "./repositories/postgresRunRepository.js";
 import type { IRunRepository } from "./repositories/runRepository.js";
 import { registerHealthRoutes } from "./routes/health.js";
 import { registerRunRoutes } from "./routes/runs.js";
-import { RunApplicationService } from "./services/runService.js";
+import { AgentRunService } from "./services/agentRunService.js";
+import type { RunApplicationService } from "./services/runService.js";
 
 export interface BuildAppOptions {
   logger?: Logger | undefined;
   corsOrigin?: string | string[] | undefined;
   runRepository?: IRunRepository | undefined;
-  runService?: RunApplicationService | undefined;
+  runService?: AgentRunService | RunApplicationService | undefined;
   databaseContext?: DatabaseContext | undefined;
 }
 
@@ -62,7 +63,7 @@ export async function buildApp(options: BuildAppOptions = {}): Promise<FastifyIn
     }
   }
 
-  const runService = options.runService ?? new RunApplicationService(repository, logger);
+  const runService = options.runService ?? new AgentRunService(repository, logger);
 
   // Register health & readiness routes
   registerHealthRoutes(app);
