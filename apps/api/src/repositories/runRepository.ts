@@ -31,7 +31,11 @@ export interface FindAllRunsResult {
 export interface IRunRepository {
   findById(id: RunId): Promise<Run | null>;
   findAll(options?: RunFilterOptions): Promise<FindAllRunsResult>;
-  save(run: Run): Promise<void>;
+  /**
+   * Persists a run and its tasks.
+   * If events are provided, persists the run, tasks, and events within a single atomic boundary.
+   */
+  save(run: Run, events?: readonly RunEvent[]): Promise<void>;
   findEvents(runId: RunId, options?: EventFilterOptions): Promise<RunEvent[]>;
   saveEvent(event: RunEvent): Promise<void>;
   resetToDefaults(): Promise<void>;

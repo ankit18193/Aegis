@@ -27,7 +27,7 @@ describe("PostgresRunRepository Integration Tests (Real PostgreSQL)", () => {
     // Ensure migrations are up to date
     await runMigrations(ctx.db);
     repository = new PostgresRunRepository(ctx);
-  });
+  }, 30000);
 
   beforeEach(async () => {
     // Reset to canonical seed data before each test
@@ -307,5 +307,42 @@ describe("PostgresRunRepository Integration Tests (Real PostgreSQL)", () => {
         queryCount: 12,
       });
     });
+
+    it("atomically persists run updates and new events in a single transaction", async () => {
+      const run = await repository.findById(runId("run-001"));
+      expect(run).not.toBeNull();
+      if (!run) return;
+
+      run.status = "running";
+      run.progress = 65;
+
+      const atomicEvent: RunEvent = {
+        id: eventId("ev-atomic-test-01"),
+        runId: run.id,
+        type: "tool_invoked",
+        severity: "info",
+        timestamp: new Date().toISOString(),
+        message: "Action 'calculate' executed successfully",
+        metadata: {
+          actionName: "calculate",
+          result: 42,
+        },
+      };
+
+      await repository.save(run, [atomicEvent]);
+
+      const reloadedRun = await repository.findById(run.id);
+      expect(reloadedRun?.progress).toBe(65);
+
+      const events = await repository.findEvents(run.id);
+      const foundEvent = events.find((e) => e.id === eventId("ev-atomic-test-01"));
+      expect(foundEvent).toBeDefined();
+      expect(foundEvent?.type).toBe("tool_invoked");
+      expect(foundEvent?.metadata).toEqual({
+        actionName: "calculate",
+        result: 42,
+      });
+    });
   });
 });
+

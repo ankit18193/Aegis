@@ -15,7 +15,8 @@ export type DomainEventType =
   | "task_started"
   | "task_completed"
   | "task_failed"
-  | "task_cancelled";
+  | "task_cancelled"
+  | "tool_invoked";
 
 export interface BaseDomainEvent {
   readonly id: string;
@@ -83,6 +84,21 @@ export interface TaskCancelledDomainEvent extends BaseDomainEvent {
   readonly reason?: string | undefined;
 }
 
+/**
+ * Domain event emitted when an action is executed.
+ * In Phase 6, 'tool_invoked' is used for contract compatibility with @aegis/contracts
+ * to represent execution of the runtime's internal action boundary.
+ * (Full Tool Registry and external tool lifecycle are introduced in Phase 7).
+ */
+export interface ToolInvokedDomainEvent extends BaseDomainEvent {
+  readonly type: "tool_invoked";
+  readonly toolName: string;
+  readonly input?: Record<string, unknown> | undefined;
+  readonly output?: unknown;
+  readonly error?: string | undefined;
+  readonly taskId?: TaskId | undefined;
+}
+
 export type DomainEvent =
   | RunCreatedDomainEvent
   | RunStartedDomainEvent
@@ -93,4 +109,5 @@ export type DomainEvent =
   | TaskStartedDomainEvent
   | TaskCompletedDomainEvent
   | TaskFailedDomainEvent
-  | TaskCancelledDomainEvent;
+  | TaskCancelledDomainEvent
+  | ToolInvokedDomainEvent;

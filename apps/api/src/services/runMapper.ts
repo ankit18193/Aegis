@@ -227,5 +227,23 @@ export function mapDomainEventToRunEvent(event: DomainEvent): RunEvent {
           : `Task '${event.taskName}' cancelled`,
         taskId: event.taskId,
       };
+    case "tool_invoked":
+      return {
+        id,
+        runId: event.runId,
+        type: "tool_invoked",
+        severity: event.error ? "warn" : "info",
+        timestamp: event.timestamp,
+        message: event.error
+          ? `Action '${event.toolName}' failed: ${event.error}`
+          : `Action '${event.toolName}' executed successfully`,
+        taskId: event.taskId,
+        metadata: {
+          actionName: event.toolName,
+          input: event.input,
+          output: event.output,
+          error: event.error,
+        },
+      };
   }
 }

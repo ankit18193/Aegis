@@ -217,5 +217,24 @@ describe("ExecutionRun Aggregate Root", () => {
       expect(reconstituted.tasks[0]?.status).toBe("completed");
       expect(reconstituted.pullEvents()).toHaveLength(0); // Clean event buffer on reconstitution
     });
+
+    it("records tool_invoked domain event and pulls it cleanly", () => {
+      const run = createValidRun();
+      run.start();
+      run.recordToolInvocation("echo", { text: "hello" }, { echoed: "hello" }, undefined, taskId("t1"));
+
+      const events = run.pullEvents();
+      expect(events.some((e) => e.type === "tool_invoked")).toBe(true);
+
+      const toolEvent = events.find((e) => e.type === "tool_invoked");
+      expect(toolEvent).toBeDefined();
+      if (toolEvent) {
+        expect(toolEvent.toolName).toBe("echo");
+        expect(toolEvent.input).toEqual({ text: "hello" });
+        expect(toolEvent.output).toEqual({ echoed: "hello" });
+        expect(toolEvent.taskId).toBe("t1");
+      }
+    });
   });
 });
+

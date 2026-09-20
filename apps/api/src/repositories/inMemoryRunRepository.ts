@@ -81,8 +81,15 @@ export class InMemoryRunRepository implements IRunRepository {
     });
   }
 
-  save(run: Run): Promise<void> {
+  save(run: Run, events?: readonly RunEvent[]): Promise<void> {
     this.runs.set(run.id, structuredClone(run));
+    if (events && events.length > 0) {
+      const list = this.events.get(run.id) ?? [];
+      for (const event of events) {
+        list.push(structuredClone(event));
+      }
+      this.events.set(run.id, list);
+    }
     return Promise.resolve();
   }
 

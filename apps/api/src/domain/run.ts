@@ -471,6 +471,32 @@ export class ExecutionRun {
     return ok(undefined);
   }
 
+  /**
+   * Records a tool/action invocation domain event within the aggregate.
+   * In Phase 6, represents internal action execution for contract compatibility.
+   */
+  recordToolInvocation(
+    toolName: string,
+    input?: Record<string, unknown>,
+    output?: unknown,
+    error?: string,
+    taskId?: TaskId,
+    timestamp: string = new Date().toISOString(),
+  ): void {
+    this._updatedAt = timestamp;
+    this.recordEvent({
+      id: `evt-${crypto.randomUUID()}`,
+      runId: this.id,
+      type: "tool_invoked",
+      timestamp,
+      toolName,
+      input,
+      output,
+      error,
+      taskId,
+    });
+  }
+
   toSnapshot(): RunSnapshot {
     const taskSnapshots = Array.from(this._tasks.values()).map((t) => t.toSnapshot());
     return {

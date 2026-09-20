@@ -218,7 +218,7 @@ export class PostgresRunRepository implements IRunRepository {
     };
   }
 
-  async save(run: Run): Promise<void> {
+  async save(run: Run, events?: readonly RunEvent[]): Promise<void> {
     await this.db.transaction(async (tx) => {
       // 1. Upsert run record
       await tx
@@ -292,6 +292,37 @@ export class PostgresRunRepository implements IRunRepository {
           );
       } else {
         await tx.delete(tasksTable).where(eq(tasksTable.runId, run.id));
+      }
+
+      // 3. Atomically persist domain events if provided
+      if (events && events.length > 0) {
+        for (const event of events) {
+          await tx
+            .insert(runEventsTable)
+            .values({
+              id: event.id,
+              runId: event.runId,
+              type: event.type,
+              severity: event.severity,
+              timestamp: event.timestamp,
+              message: event.message,
+              taskId: event.taskId ?? null,
+              taskName: event.taskName ?? null,
+              metadata: event.metadata ?? null,
+            })
+            .onConflictDoUpdate({
+              target: runEventsTable.id,
+              set: {
+                type: event.type,
+                severity: event.severity,
+                timestamp: event.timestamp,
+                message: event.message,
+                taskId: event.taskId ?? null,
+                taskName: event.taskName ?? null,
+                metadata: event.metadata ?? null,
+              },
+            });
+        }
       }
     });
   }
