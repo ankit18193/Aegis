@@ -26,11 +26,11 @@ export function isMockEnabled(): boolean {
   if (mockOverride !== null) {
     return mockOverride;
   }
-  if (import.meta.env.VITE_USE_MOCK !== undefined) {
-    return import.meta.env.VITE_USE_MOCK === "true";
-  }
   if (import.meta.env.MODE === "test") {
     return true;
+  }
+  if (import.meta.env.VITE_USE_MOCK !== undefined) {
+    return import.meta.env.VITE_USE_MOCK === "true";
   }
   return false;
 }

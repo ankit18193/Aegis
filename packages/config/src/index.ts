@@ -11,9 +11,38 @@
  * - Implement config hot-reloading where appropriate
  */
 
+import fs from "node:fs";
+import path from "node:path";
+
 // ─────────────────────────────────────────────────────────────────────────────
 // Environment helpers
 // ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Loads .env file into process.env if present.
+ * Uses native Node.js process.loadEnvFile (zero external dependencies).
+ */
+function tryLoadEnv(): void {
+  if (typeof process.loadEnvFile !== "function") return;
+
+  const candidates = [
+    path.resolve(process.cwd(), ".env"),
+    path.resolve(process.cwd(), "../../.env"),
+  ];
+
+  for (const file of candidates) {
+    if (fs.existsSync(file)) {
+      try {
+        process.loadEnvFile(file);
+        break;
+      } catch {
+        // Continue searching
+      }
+    }
+  }
+}
+
+tryLoadEnv();
 
 /**
  * Supported runtime environments.
