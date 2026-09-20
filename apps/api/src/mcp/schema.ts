@@ -21,7 +21,6 @@ const UNSUPPORTED_KEYWORDS = [
   "oneOf",
   "allOf",
   "$ref",
-  "$schema",
   "not",
   "patternProperties",
   "if",
