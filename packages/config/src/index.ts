@@ -153,3 +153,24 @@ export function loadDatabaseConfig(): DatabaseConfig {
   };
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// Agent Runtime config (Phase 6: Agent Runtime)
+// ─────────────────────────────────────────────────────────────────────────────
+
+export interface AgentConfig {
+  readonly maxIterations: number;
+}
+
+/**
+ * Reads agent runtime configuration from the environment.
+ * Maps AGENT_MAX_ITERATIONS (default: 10).
+ */
+export function loadAgentConfig(): AgentConfig {
+  const maxIterationsStr = optionalEnv("AGENT_MAX_ITERATIONS", "10");
+  const maxIterations = parseInt(maxIterationsStr, 10);
+
+  return {
+    maxIterations: Number.isNaN(maxIterations) || maxIterations < 1 ? 10 : maxIterations,
+  };
+}
+

@@ -1,6 +1,8 @@
 import {
   getNodeEnv,
+  loadAgentConfig,
   loadDatabaseConfig,
+  type AgentConfig,
   type DatabaseConfig,
   type NodeEnv,
   optionalEnv,
@@ -13,6 +15,7 @@ export interface ApiServerConfig {
   readonly nodeEnv: NodeEnv;
   readonly logLevel: string;
   readonly database: DatabaseConfig;
+  readonly agent: AgentConfig;
 }
 
 export function loadApiConfig(): ApiServerConfig {
@@ -26,6 +29,7 @@ export function loadApiConfig(): ApiServerConfig {
     nodeEnv: getNodeEnv(),
     logLevel: optionalEnv("LOG_LEVEL", "info"),
     database: loadDatabaseConfig(),
+    agent: loadAgentConfig(),
   };
 }
 

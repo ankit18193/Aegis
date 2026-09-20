@@ -63,7 +63,11 @@ export async function buildApp(options: BuildAppOptions = {}): Promise<FastifyIn
     }
   }
 
-  const runService = options.runService ?? new AgentRunService(repository, logger);
+  const runService =
+    options.runService ??
+    new AgentRunService(repository, logger, {
+      policy: { maxIterations: config.agent.maxIterations },
+    });
 
   // Register health & readiness routes
   registerHealthRoutes(app);

@@ -4,6 +4,7 @@ import {
   getNodeEnv,
   isProduction,
   isTest,
+  loadAgentConfig,
   loadBaseConfig,
   loadDatabaseConfig,
   optionalEnv,
@@ -91,6 +92,33 @@ describe("@aegis/config", () => {
       const dbConfig = loadDatabaseConfig();
       expect(dbConfig.poolMin).toBe(2);
       expect(dbConfig.poolMax).toBe(10);
+    });
+  });
+
+  describe("loadAgentConfig", () => {
+    it("loads agent config with default maxIterations when unset", () => {
+      delete process.env["AGENT_MAX_ITERATIONS"];
+
+      const agentConfig = loadAgentConfig();
+      expect(agentConfig.maxIterations).toBe(10);
+    });
+
+    it("loads custom maxIterations", () => {
+      process.env["AGENT_MAX_ITERATIONS"] = "25";
+
+      const agentConfig = loadAgentConfig();
+      expect(agentConfig.maxIterations).toBe(25);
+    });
+
+    it("falls back to default 10 when maxIterations is invalid or non-positive", () => {
+      process.env["AGENT_MAX_ITERATIONS"] = "invalid";
+      expect(loadAgentConfig().maxIterations).toBe(10);
+
+      process.env["AGENT_MAX_ITERATIONS"] = "0";
+      expect(loadAgentConfig().maxIterations).toBe(10);
+
+      process.env["AGENT_MAX_ITERATIONS"] = "-3";
+      expect(loadAgentConfig().maxIterations).toBe(10);
     });
   });
 });
