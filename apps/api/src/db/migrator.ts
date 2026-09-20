@@ -13,7 +13,8 @@ import { migrate } from "drizzle-orm/postgres-js/migrator";
  * Runs pending database migrations.
  */
 export async function runMigrations(
-  db: PostgresJsDatabase,
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  db: PostgresJsDatabase<any>,
   migrationsFolder?: string,
 ): Promise<void> {
   const currentDir = path.dirname(fileURLToPath(import.meta.url));

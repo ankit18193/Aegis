@@ -7,8 +7,10 @@ import { loadDatabaseConfig, type DatabaseConfig } from "@aegis/config";
 import { drizzle, type PostgresJsDatabase } from "drizzle-orm/postgres-js";
 import postgres, { type Sql } from "postgres";
 
+import * as schema from "./schema.js";
+
 export interface DatabaseContext {
-  readonly db: PostgresJsDatabase;
+  readonly db: PostgresJsDatabase<typeof schema>;
   readonly sql: Sql;
   readonly close: () => Promise<void>;
 }
@@ -29,7 +31,7 @@ export function createDatabaseContext(customConfig?: DatabaseConfig): DatabaseCo
     },
   });
 
-  const db = drizzle(sql);
+  const db = drizzle(sql, { schema });
 
   return {
     db,
