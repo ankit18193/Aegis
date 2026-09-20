@@ -70,10 +70,25 @@ export class AgentRunService {
   ) {
     this.planner =
       options.planner ??
-      new DeterministicPlanner([
-        { type: "execute", action: { name: "echo", payload: { step: "init", message: "Starting agent execution" } } },
-        { type: "complete", summary: "Agent execution completed successfully" },
-      ]);
+      new DeterministicPlanner((state: AgentState) => {
+        if (state.iteration === 0) {
+          return ok({
+            type: "execute",
+            action: {
+              name: "echo",
+              payload: {
+                step: "init",
+                goal: state.goal,
+                message: "Analyzing goal and formulating execution actions",
+              },
+            },
+          });
+        }
+        return ok({
+          type: "complete",
+          summary: `Successfully completed execution for goal: '${state.goal}'`,
+        });
+      });
     this.executor = options.executor ?? new DefaultActionExecutor();
     this.policy = options.policy ?? DEFAULT_EXECUTION_POLICY;
     this.dispatcher = options.dispatcher ?? new InProcessExecutionDispatcher();
@@ -185,6 +200,10 @@ export class AgentRunService {
    * capturing action observations, and atomically persisting state.
    */
   async executeRun(runId: RunId, abortSignal?: AbortSignal): Promise<void> {
+    if (abortSignal?.aborted) {
+      return;
+    }
+
     const existing = await this.repository.findById(runId);
     if (!existing) {
       return;
@@ -221,6 +240,10 @@ export class AgentRunService {
     // Start Phase 3 task (Action Execution)
     run.scheduleTask(task3Id);
     run.startTask(task3Id, workerId("agent-worker-01"));
+
+    if (abortSignal?.aborted) {
+      return;
+    }
 
     // Persist intermediate starting state atomically
     await this.repository.save(
@@ -261,6 +284,15 @@ export class AgentRunService {
     // 3. Create AgentRuntime with onStep hook to capture action events
     const runtime = new AgentRuntime(this.planner, this.executor, this.policy, {
       onStep: async (_state, action, observation) => {
+        if (abortSignal?.aborted) {
+          return;
+        }
+
+        const current = await this.repository.findById(runId);
+        if (current && (current.status === "cancelled" || current.status === "completed" || current.status === "failed")) {
+          return;
+        }
+
         run.recordToolInvocation(
           action.name,
           action.payload,
