@@ -7,6 +7,7 @@
  */
 
 import { createLogger } from "@aegis/logger";
+import { sql } from "drizzle-orm";
 
 import { buildApp } from "./app.js";
 import { loadApiConfig } from "./config/index.js";
@@ -36,12 +37,29 @@ async function main(): Promise<void> {
   let repository: IRunRepository;
 
   if (config.database.url) {
-    databaseContext = createDatabaseContext(config.database);
-    repository = new PostgresRunRepository(databaseContext);
-    logger.info("PostgreSQL persistence layer initialized", {
-      poolMin: config.database.poolMin,
-      poolMax: config.database.poolMax,
-    });
+    try {
+      const candidateCtx = createDatabaseContext(config.database);
+      await Promise.race([
+        candidateCtx.db.execute(sql`SELECT 1`),
+        new Promise((_, reject) => {
+          setTimeout(() => {
+            reject(new Error("Database connection ping timed out after 2000ms"));
+          }, 2000);
+        }),
+      ]);
+      databaseContext = candidateCtx;
+      repository = new PostgresRunRepository(databaseContext);
+      logger.info("PostgreSQL persistence layer initialized and connected", {
+        poolMin: config.database.poolMin,
+        poolMax: config.database.poolMax,
+      });
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err);
+      logger.warn("PostgreSQL unavailable; falling back to in-memory repository", {
+        error: msg,
+      });
+      repository = new InMemoryRunRepository(true);
+    }
   } else {
     repository = new InMemoryRunRepository(true);
     logger.warn("No DATABASE_URL configured; falling back to in-memory repository");

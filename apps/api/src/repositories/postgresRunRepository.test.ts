@@ -5,6 +5,8 @@
  * against the real Docker PostgreSQL instance.
  */
 
+import * as net from "node:net";
+
 import type { Run, RunEvent } from "@aegis/contracts";
 import { eventId, runId, taskId, workflowId } from "@aegis/types";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
@@ -14,13 +16,34 @@ import { runMigrations } from "../db/migrator.js";
 
 import { PostgresRunRepository } from "./postgresRunRepository.js";
 
-describe("PostgresRunRepository Integration Tests (Real PostgreSQL)", () => {
+async function isDatabaseReachable(port = 5433, host = "localhost"): Promise<boolean> {
+  return new Promise((resolve) => {
+    const socket = net.createConnection({ port, host });
+    socket.setTimeout(1000);
+    socket.on("connect", () => {
+      socket.destroy();
+      resolve(true);
+    });
+    socket.on("timeout", () => {
+      socket.destroy();
+      resolve(false);
+    });
+    socket.on("error", () => {
+      socket.destroy();
+      resolve(false);
+    });
+  });
+}
+
+const dbAvailable = await isDatabaseReachable();
+
+describe.runIf(dbAvailable)("PostgresRunRepository Integration Tests (Real PostgreSQL)", () => {
   let ctx: DatabaseContext;
   let repository: PostgresRunRepository;
 
   beforeAll(async () => {
     ctx = createDatabaseContext({
-      url: "postgresql://postgres:postgres@localhost:5433/aegis",
+      url: process.env["DATABASE_URL"] ?? "postgresql://postgres:postgres@localhost:5433/aegis",
       poolMin: 1,
       poolMax: 3,
     });
