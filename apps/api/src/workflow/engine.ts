@@ -84,102 +84,150 @@ export class WorkflowEngine implements IWorkflowEngine {
       }
     }
 
-    // 4. Orchestration loop
-    while (!run.isTerminal()) {
-      // Check cancellation signal before each task selection
-      if (context?.abortSignal?.aborted) {
+    const onAbort = (): void => {
+      if (!run.isTerminal()) {
         const reason =
-          typeof context.abortSignal.reason === "string"
+          typeof context?.abortSignal?.reason === "string"
             ? context.abortSignal.reason
             : "Execution cancelled by operator";
         run.cancel(reason);
-        break;
       }
+    };
 
-      const report = this.scheduler.getReadinessReport(run.tasks);
+    context?.abortSignal?.addEventListener("abort", onAbort, { once: true });
 
-      // 4a. Check successful completion
-      if (report.isComplete) {
-        run.complete("Workflow executed successfully");
-        break;
-      }
-
-      // 4b. Check failure or blocked state (LOCK 6 & Correction #2)
-      if (this.scheduler.isWorkflowFailed(run.tasks)) {
-        const failedTask = run.tasks.find((t) => t.status === "failed");
-        const errorDetail = failedTask?.error ?? "Workflow contains blocked tasks and cannot proceed";
-        run.fail(errorDetail);
-        break;
-      }
-
-      // 4c. Select next ready task in canonical deterministic order
-      if (report.readyTasks.length > 0) {
-        const nextTask = report.readyTasks[0];
-        if (!nextTask) {
-          break;
-        }
-
-        // Schedule task
-        const schedRes = run.scheduleTask(nextTask.id);
-        if (!schedRes.ok) {
-          run.fail(schedRes.error.message);
-          break;
-        }
-        await context?.onTaskScheduled?.(nextTask);
-
-        // Start task
-        const startTaskRes = run.startTask(nextTask.id);
-        if (!startTaskRes.ok) {
-          run.fail(startTaskRes.error.message);
-          break;
-        }
-        await context?.onTaskStarted?.(nextTask);
-
-        // Resolve input dependencies
-        const inputResult = this.dependencyResolver.resolveExecutionInput(
-          nextTask,
-          run.tasks,
-        );
-
-        if (!inputResult.ok) {
-          run.failTask(nextTask.id, inputResult.error.message);
-          run.fail(`Failed resolving inputs for task '${nextTask.id}': ${inputResult.error.message}`);
-          break;
-        }
-
-        // Execute task via boundary
-        const execOutput = await this.taskExecutor.execute(
-          inputResult.value,
-          context?.abortSignal,
-        );
-
-        // Handle cancellation post-execution
+    try {
+      // 4. Orchestration loop
+      while (!run.isTerminal()) {
+        // Check cancellation signal before each task selection
         if (context?.abortSignal?.aborted) {
-          const cancelReason =
-            typeof context.abortSignal.reason === "string"
-              ? context.abortSignal.reason
-              : "Execution cancelled";
-          run.cancel(cancelReason);
+          if (!run.isTerminal()) {
+            const reason =
+              typeof context.abortSignal.reason === "string"
+                ? context.abortSignal.reason
+                : "Execution cancelled by operator";
+            run.cancel(reason);
+          }
           break;
         }
 
-        if (execOutput.success) {
-          run.completeTask(nextTask.id, execOutput.output);
-          await context?.onTaskCompleted?.(nextTask, execOutput.output);
+        const report = this.scheduler.getReadinessReport(run.tasks);
+
+        // 4a. Check successful completion
+        if (report.isComplete) {
+          if (!run.isTerminal()) {
+            run.complete("Workflow executed successfully");
+          }
+          break;
+        }
+
+        // 4b. Check failure or blocked state (LOCK 6 & Correction #2)
+        if (this.scheduler.isWorkflowFailed(run.tasks)) {
+          if (!run.isTerminal()) {
+            const failedTask = run.tasks.find((t) => t.status === "failed");
+            const errorDetail =
+              failedTask?.error ??
+              "Workflow contains blocked tasks and cannot proceed";
+            run.fail(errorDetail);
+          }
+          break;
+        }
+
+        // 4c. Select next ready task in canonical deterministic order
+        if (report.readyTasks.length > 0) {
+          const nextTask = report.readyTasks[0];
+          if (!nextTask) {
+            break;
+          }
+
+          // Schedule task
+          const schedRes = run.scheduleTask(nextTask.id);
+          if (!schedRes.ok) {
+            if (!run.isTerminal()) {
+              run.fail(schedRes.error.message);
+            }
+            break;
+          }
+          await context?.onTaskScheduled?.(nextTask);
+
+          // Start task
+          const startTaskRes = run.startTask(nextTask.id);
+          if (!startTaskRes.ok) {
+            if (!run.isTerminal()) {
+              run.fail(startTaskRes.error.message);
+            }
+            break;
+          }
+          await context?.onTaskStarted?.(nextTask);
+
+          // Resolve input dependencies
+          const inputResult = this.dependencyResolver.resolveExecutionInput(
+            nextTask,
+            run.tasks,
+          );
+
+          if (!inputResult.ok) {
+            if (!nextTask.isTerminal()) {
+              run.failTask(nextTask.id, inputResult.error.message);
+            }
+            if (!run.isTerminal()) {
+              run.fail(
+                `Failed resolving inputs for task '${nextTask.id}': ${inputResult.error.message}`,
+              );
+            }
+            break;
+          }
+
+          // Execute task via boundary
+          const execOutput = await this.taskExecutor.execute(
+            inputResult.value,
+            context?.abortSignal,
+          );
+
+          // Handle cancellation post-execution (terminal state wins)
+          if (context?.abortSignal?.aborted) {
+            if (!run.isTerminal()) {
+              const cancelReason =
+                typeof context.abortSignal.reason === "string"
+                  ? context.abortSignal.reason
+                  : "Execution cancelled";
+              run.cancel(cancelReason);
+            }
+            break;
+          }
+
+          if (run.isTerminal()) {
+            break;
+          }
+
+          if (execOutput.success) {
+            run.completeTask(nextTask.id, execOutput.output);
+            await context?.onTaskCompleted?.(nextTask, execOutput.output);
+          } else {
+            // Task failure (LOCK 6 & Correction #2: task fails -> dependent tasks blocked -> run fails)
+            const errorMsg = execOutput.error ?? "Task execution failed";
+            run.failTask(nextTask.id, errorMsg);
+            await context?.onTaskFailed?.(nextTask, errorMsg);
+
+            // Terminate run deterministically upon task failure
+            if (!run.isTerminal()) {
+              run.fail(`Workflow failed at task '${nextTask.id}': ${errorMsg}`);
+            }
+            break;
+          }
         } else {
-          // Task failure (LOCK 6 & Correction #2: task fails -> dependent tasks blocked -> run fails)
-          const errorMsg = execOutput.error ?? "Task execution failed";
-          run.failTask(nextTask.id, errorMsg);
-          await context?.onTaskFailed?.(nextTask, errorMsg);
-
-          // Terminate run deterministically upon task failure
-          run.fail(`Workflow failed at task '${nextTask.id}': ${errorMsg}`);
+          // No ready tasks, not complete, not failed -> Deadlock guard
+          if (!run.isTerminal()) {
+            run.fail(
+              "Workflow reached deadlocked state with no eligible ready tasks",
+            );
+          }
           break;
         }
-      } else {
-        // No ready tasks, not complete, not failed -> Deadlock guard
-        run.fail("Workflow reached deadlocked state with no eligible ready tasks");
-        break;
+      }
+    } finally {
+      if (context?.abortSignal) {
+        context.abortSignal.removeEventListener("abort", onAbort);
       }
     }
 
