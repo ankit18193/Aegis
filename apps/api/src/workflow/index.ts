@@ -9,3 +9,4 @@ export * from "./validation.js";
 export * from "./scheduler.js";
 export * from "./dependency-resolver.js";
 export * from "./task-executor.js";
+export * from "./engine.js";
