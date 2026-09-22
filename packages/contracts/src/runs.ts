@@ -79,6 +79,9 @@ export function isValidTaskTransition(from: TaskStatus, to: TaskStatus): boolean
 // Task & Workflow Schemas
 // ─────────────────────────────────────────────────────────────────────────────
 
+export const taskInputSchema = z.union([z.record(z.unknown()), z.string()]);
+export type TaskInput = z.infer<typeof taskInputSchema>;
+
 export const taskSchema = z.object({
   id: taskIdSchema,
   name: z.string().min(1),
@@ -88,6 +91,7 @@ export const taskSchema = z.object({
   startedAt: z.string().optional(),
   completedAt: z.string().optional(),
   attemptCount: z.number().int().min(0).default(0),
+  input: taskInputSchema.optional(),
   output: z.string().optional(),
   error: z.string().optional(),
   dependencies: z.array(taskIdSchema).optional(),

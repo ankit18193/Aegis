@@ -22,6 +22,7 @@ export interface TaskSnapshot {
   readonly startedAt?: string | undefined;
   readonly completedAt?: string | undefined;
   readonly attemptCount: number;
+  readonly input?: Record<string, unknown> | string | undefined;
   readonly output?: string | undefined;
   readonly error?: string | undefined;
   readonly dependencies?: readonly TaskId[] | undefined;
@@ -32,6 +33,7 @@ export interface CreateTaskProps {
   readonly name: string;
   readonly description?: string | undefined;
   readonly dependencies?: readonly TaskId[] | undefined;
+  readonly input?: Record<string, unknown> | string | undefined;
 }
 
 export class TaskEntity {
@@ -40,6 +42,7 @@ export class TaskEntity {
   private _startedAt?: string | undefined;
   private _completedAt?: string | undefined;
   private _attemptCount: number;
+  private _input?: Record<string, unknown> | string | undefined;
   private _output?: string | undefined;
   private _error?: string | undefined;
 
@@ -55,6 +58,7 @@ export class TaskEntity {
     completedAt?: string,
     output?: string,
     error?: string,
+    input?: Record<string, unknown> | string,
   ) {
     this._status = status;
     this._attemptCount = attemptCount;
@@ -63,6 +67,7 @@ export class TaskEntity {
     this._completedAt = completedAt;
     this._output = output;
     this._error = error;
+    this._input = input;
   }
 
   static create(props: CreateTaskProps): TaskEntity {
@@ -73,6 +78,12 @@ export class TaskEntity {
       props.dependencies ?? [],
       "pending",
       0,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      props.input,
     );
   }
 
@@ -89,6 +100,7 @@ export class TaskEntity {
       snapshot.completedAt,
       snapshot.output,
       snapshot.error,
+      snapshot.input,
     );
   }
 
@@ -110,6 +122,10 @@ export class TaskEntity {
 
   get attemptCount(): number {
     return this._attemptCount;
+  }
+
+  get input(): Record<string, unknown> | string | undefined {
+    return this._input;
   }
 
   get output(): string | undefined {
@@ -217,6 +233,7 @@ export class TaskEntity {
       startedAt: this._startedAt,
       completedAt: this._completedAt,
       attemptCount: this._attemptCount,
+      input: this._input,
       output: this._output,
       error: this._error,
       dependencies: [...this.dependencies],
