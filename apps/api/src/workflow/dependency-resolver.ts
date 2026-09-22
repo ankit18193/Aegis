@@ -96,7 +96,7 @@ export class DependencyResolver {
 
     return task.dependencies.every((depId) => {
       const dep = tasksById.get(depId);
-      return dep !== undefined && dep.status === "completed";
+      return dep?.status === "completed";
     });
   }
 
@@ -112,7 +112,7 @@ export class DependencyResolver {
     const outputs: Record<TaskId, string | undefined> = {};
     for (const depId of task.dependencies) {
       const dep = tasksById.get(depId);
-      if (dep && dep.status === "completed") {
+      if (dep?.status === "completed") {
         outputs[depId] = dep.output;
       }
     }

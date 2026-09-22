@@ -51,16 +51,19 @@ describe("WorkflowTaskExecutor", () => {
   describe("Direct ToolAction execution", () => {
     it("executes declared tool action through IActionExecutor", async () => {
       const mockActionExecutor: IActionExecutor = {
-        execute: async (action) => ({
-          ok: true,
-          value: {
-            actionName: action.name,
-            success: true,
-            data: `Echoed: ${JSON.stringify(action.payload)}`,
-            durationMs: 5,
-            timestamp: new Date().toISOString(),
-          },
-        }),
+        execute: async (action) => {
+          await Promise.resolve();
+          return {
+            ok: true,
+            value: {
+              actionName: action.name,
+              success: true,
+              data: `Echoed: ${JSON.stringify(action.payload)}`,
+              durationMs: 5,
+              timestamp: new Date().toISOString(),
+            },
+          };
+        },
       };
 
       const executor = new WorkflowTaskExecutor({
@@ -89,16 +92,19 @@ describe("WorkflowTaskExecutor", () => {
 
     it("captures tool failure and returns clean error without throwing", async () => {
       const mockFailingExecutor: IActionExecutor = {
-        execute: async (action) => ({
-          ok: true,
-          value: {
-            actionName: action.name,
-            success: false,
-            error: "Tool parameter validation failed",
-            durationMs: 2,
-            timestamp: new Date().toISOString(),
-          },
-        }),
+        execute: async (action) => {
+          await Promise.resolve();
+          return {
+            ok: true,
+            value: {
+              actionName: action.name,
+              success: false,
+              error: "Tool parameter validation failed",
+              durationMs: 2,
+              timestamp: new Date().toISOString(),
+            },
+          };
+        },
       };
 
       const executor = new WorkflowTaskExecutor({
@@ -135,15 +141,18 @@ describe("WorkflowTaskExecutor", () => {
       }));
 
       const mockActionExecutor: IActionExecutor = {
-        execute: async () => ({
-          ok: true,
-          value: {
-            actionName: "noop",
-            success: true,
-            durationMs: 0,
-            timestamp: new Date().toISOString(),
-          },
-        }),
+        execute: async () => {
+          await Promise.resolve();
+          return {
+            ok: true,
+            value: {
+              actionName: "noop",
+              success: true,
+              durationMs: 0,
+              timestamp: new Date().toISOString(),
+            },
+          };
+        },
       };
 
       const customRuntime = new AgentRuntime(failingPlanner, mockActionExecutor, {

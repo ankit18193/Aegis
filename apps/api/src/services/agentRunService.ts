@@ -24,15 +24,13 @@ import {
   ok,
   runId as toRunId,
   taskId,
-  workerId,
   workflowId,
 } from "@aegis/types";
 
 import type { IActionExecutor } from "../agent/action.js";
 import { DeterministicPlanner, type IPlanner } from "../agent/planner.js";
 import { DEFAULT_EXECUTION_POLICY, type ExecutionPolicy } from "../agent/policy.js";
-import { AgentRuntime } from "../agent/runtime.js";
-import { AgentState } from "../agent/state.js";
+import type { AgentState } from "../agent/state.js";
 import { ExecutionRun } from "../domain/run.js";
 import { TaskEntity } from "../domain/task.js";
 import type { IRunRepository } from "../repositories/runRepository.js";
@@ -40,7 +38,14 @@ import { ToolActionExecutor } from "../tools/adapter.js";
 import { registerBuiltinTools } from "../tools/builtins/index.js";
 import { ToolExecutor } from "../tools/executor.js";
 import { ToolRegistry } from "../tools/registry.js";
-import { sanitizePayload } from "../tools/safety.js";
+import { WorkflowEngine } from "../workflow/engine.js";
+import { WorkflowTaskExecutor } from "../workflow/task-executor.js";
+import type {
+  ITaskExecutor,
+  IWorkflowEngine,
+  WorkflowDefinition,
+  WorkflowExecutionContext,
+} from "../workflow/types.js";
 
 import { InProcessExecutionDispatcher, type IExecutionDispatcher } from "./executionDispatcher.js";
 import {
@@ -58,6 +63,8 @@ export interface AgentRunServiceOptions {
   dispatcher?: IExecutionDispatcher | undefined;
   autoExecute?: boolean | undefined;
   stepDelayMs?: number | undefined;
+  workflowEngine?: IWorkflowEngine | undefined;
+  taskExecutor?: ITaskExecutor | undefined;
 }
 
 export class AgentRunService {
@@ -67,6 +74,8 @@ export class AgentRunService {
   private readonly dispatcher: IExecutionDispatcher;
   private readonly autoExecute: boolean;
   private readonly stepDelayMs: number;
+  private readonly workflowEngine?: IWorkflowEngine | undefined;
+  private readonly taskExecutor?: ITaskExecutor | undefined;
 
   constructor(
     private readonly repository: IRunRepository,
@@ -143,31 +152,44 @@ export class AgentRunService {
     const newId = toRunId(`run-${Date.now().toString().slice(-4)}-${runSequence.toString()}`);
     const wfId = workflowId(`wf-${newId}`);
 
-    const defaultTasks: TaskEntity[] = [
-      TaskEntity.create({
-        id: taskId(`task-${newId}-1`),
-        name: "Initial Goal Analysis & Scope",
-        description: "Parse execution requirements, inspect target boundaries, and sequence tasks.",
-      }),
-      TaskEntity.create({
-        id: taskId(`task-${newId}-2`),
-        name: "Execution Plan Formation",
-        description: "Generate structured task graph and configure execution parameters.",
-        dependencies: [taskId(`task-${newId}-1`)],
-      }),
-      TaskEntity.create({
-        id: taskId(`task-${newId}-3`),
-        name: "Distributed Action Execution",
-        description: "Execute assigned worker tasks and capture tool outputs.",
-        dependencies: [taskId(`task-${newId}-2`)],
-      }),
-      TaskEntity.create({
-        id: taskId(`task-${newId}-4`),
-        name: "Synthesis & Result Verification",
-        description: "Synthesize findings, verify assertions, and compile final output report.",
-        dependencies: [taskId(`task-${newId}-3`)],
-      }),
-    ];
+    let runTasks: TaskEntity[];
+    if (request.tasks && request.tasks.length > 0) {
+      runTasks = request.tasks.map((t) =>
+        TaskEntity.create({
+          id: t.id,
+          name: t.name,
+          description: t.description,
+          dependencies: t.dependencies ? [...t.dependencies] : [],
+          input: t.input,
+        }),
+      );
+    } else {
+      runTasks = [
+        TaskEntity.create({
+          id: taskId(`task-${newId}-1`),
+          name: "Initial Goal Analysis & Scope",
+          description: "Parse execution requirements, inspect target boundaries, and sequence tasks.",
+        }),
+        TaskEntity.create({
+          id: taskId(`task-${newId}-2`),
+          name: "Execution Plan Formation",
+          description: "Generate structured task graph and configure execution parameters.",
+          dependencies: [taskId(`task-${newId}-1`)],
+        }),
+        TaskEntity.create({
+          id: taskId(`task-${newId}-3`),
+          name: "Distributed Action Execution",
+          description: "Execute assigned worker tasks and capture tool outputs.",
+          dependencies: [taskId(`task-${newId}-2`)],
+        }),
+        TaskEntity.create({
+          id: taskId(`task-${newId}-4`),
+          name: "Synthesis & Result Verification",
+          description: "Synthesize findings, verify assertions, and compile final output report.",
+          dependencies: [taskId(`task-${newId}-3`)],
+        }),
+      ];
+    }
 
     const runResult = ExecutionRun.create({
       id: newId,
@@ -176,7 +198,7 @@ export class AgentRunService {
         id: request.workflowTemplateId ?? wfId,
         name: "Autonomous Execution Plan",
       },
-      tasks: defaultTasks,
+      tasks: runTasks,
       createdAt: now,
     });
 
@@ -208,8 +230,8 @@ export class AgentRunService {
   }
 
   /**
-   * Orchestrates the agent loop for a run, advancing task lifecycles,
-   * capturing action observations, and atomically persisting state.
+   * Orchestrates workflow execution across tasks, advancing task lifecycles,
+   * resolving dependencies, invoking tools, and atomically persisting state.
    */
   async executeRun(runId: RunId, abortSignal?: AbortSignal): Promise<void> {
     if (abortSignal?.aborted) {
@@ -222,46 +244,82 @@ export class AgentRunService {
     }
 
     // Cancel-before-start invariant: if already terminal (e.g. cancelled), do not execute
-    if (existing.status === "cancelled" || existing.status === "completed" || existing.status === "failed") {
+    if (
+      existing.status === "cancelled" ||
+      existing.status === "completed" ||
+      existing.status === "failed"
+    ) {
       return;
     }
 
     const run = ExecutionRun.reconstitute(mapDtoToRunSnapshot(existing));
 
-    // 1. Advance run to running
-    const startResult = run.start();
-    if (!startResult.ok) {
-      return;
-    }
+    // Helper to persist intermediate state atomically
+    const persistSnapshot = async (): Promise<void> => {
+      const intermediateDto = mapSnapshotToRunDto(run.toSnapshot());
+      const stepEvents = run.pullEvents().map(mapDomainEventToRunEvent);
+      await this.repository.save(intermediateDto, stepEvents);
+    };
 
-    const task1Id = taskId(`task-${runId}-1`);
-    const task2Id = taskId(`task-${runId}-2`);
-    const task3Id = taskId(`task-${runId}-3`);
-    const task4Id = taskId(`task-${runId}-4`);
+    // Construct WorkflowDefinition from reconstituted run
+    const workflowDef: WorkflowDefinition = {
+      id: run.workflow.id,
+      name: run.workflow.name,
+      tasks: run.tasks.map((t) => ({
+        id: t.id,
+        name: t.name,
+        description: t.description,
+        dependencies: [...t.dependencies],
+        input: t.input,
+      })),
+    };
 
-    // Advance Phase 1 task (Goal Analysis)
-    run.scheduleTask(task1Id);
-    run.startTask(task1Id);
-    run.completeTask(task1Id, "Goal scope and execution boundaries analyzed.");
+    // Configure task executor bridging actionExecutor and AgentRuntime
+    const taskExecutor =
+      this.taskExecutor ??
+      new WorkflowTaskExecutor({
+        actionExecutor: this.executor,
+        planner: this.planner,
+        policy: this.policy,
+        onToolInvoked: async (toolName, input, output, error, taskId) => {
+          if (abortSignal?.aborted) {
+            return;
+          }
+          const current = await this.repository.findById(runId);
+          if (
+            current &&
+            (current.status === "cancelled" ||
+              current.status === "completed" ||
+              current.status === "failed")
+          ) {
+            return;
+          }
+          run.recordToolInvocation(toolName, input, output, error, taskId);
+          await persistSnapshot();
+        },
+      });
 
-    // Advance Phase 2 task (Plan Formation)
-    run.scheduleTask(task2Id);
-    run.startTask(task2Id);
-    run.completeTask(task2Id, "Execution plan formulated.");
+    const engine =
+      this.workflowEngine ??
+      new WorkflowEngine({
+        taskExecutor,
+      });
 
-    // Start Phase 3 task (Action Execution)
-    run.scheduleTask(task3Id);
-    run.startTask(task3Id, workerId("agent-worker-01"));
-
-    if (abortSignal?.aborted) {
-      return;
-    }
-
-    // Persist intermediate starting state atomically
-    await this.repository.save(
-      mapSnapshotToRunDto(run.toSnapshot()),
-      run.pullEvents().map(mapDomainEventToRunEvent),
-    );
+    const context: WorkflowExecutionContext = {
+      abortSignal,
+      onTaskScheduled: async (_task) => {
+        await persistSnapshot();
+      },
+      onTaskStarted: async (_task) => {
+        await persistSnapshot();
+      },
+      onTaskCompleted: async (_task, _output) => {
+        await persistSnapshot();
+      },
+      onTaskFailed: async (_task, _error) => {
+        await persistSnapshot();
+      },
+    };
 
     const sleep = (ms: number): Promise<void> =>
       new Promise<void>((resolve) => {
@@ -283,83 +341,33 @@ export class AgentRunService {
     if (abortSignal?.aborted) {
       return;
     }
-    await sleep(this.stepDelayMs);
+    if (this.stepDelayMs > 0) {
+      await sleep(this.stepDelayMs);
+    }
     if (abortSignal?.aborted) {
       return;
     }
 
-    // 2. Initialize AgentState
-    const agentState = AgentState.init(run.id, run.goal, {
-      workflowId: run.workflow.id,
-    });
+    // Execute via WorkflowEngine
+    await engine.execute(workflowDef, run, context);
 
-    // 3. Create AgentRuntime with onStep hook to capture action events
-    const runtime = new AgentRuntime(this.planner, this.executor, this.policy, {
-      onStep: async (_state, action, observation) => {
-        if (abortSignal?.aborted) {
-          return;
-        }
-
-        const current = await this.repository.findById(runId);
-        if (current && (current.status === "cancelled" || current.status === "completed" || current.status === "failed")) {
-          return;
-        }
-
-        const sanitizedInput = sanitizePayload(action.payload);
-        run.recordToolInvocation(
-          action.name,
-          sanitizedInput,
-          observation.data,
-          observation.error,
-          task3Id,
-          observation.timestamp,
-        );
-
-        const intermediateDto = mapSnapshotToRunDto(run.toSnapshot());
-        const stepEvents = run.pullEvents().map(mapDomainEventToRunEvent);
-        await this.repository.save(intermediateDto, stepEvents);
-      },
-    });
-
-    // 4. Run agent loop
-    await runtime.run(agentState, abortSignal);
-
-    // 5. Final lifecycle resolution ("Terminal Run State Wins")
-    // Re-check repository status: if already terminal in repository, terminal state wins
+    // Terminal state protection: if already terminal in repository, terminal state wins
     const latest = await this.repository.findById(runId);
-    if (latest && (latest.status === "cancelled" || latest.status === "completed" || latest.status === "failed")) {
+    if (
+      latest &&
+      (latest.status === "cancelled" ||
+        latest.status === "completed" ||
+        latest.status === "failed")
+    ) {
       return;
     }
 
-    if (abortSignal?.aborted || agentState.status === "cancelled") {
-      if (!run.isTerminal()) {
-        run.cancel(agentState.termination?.reason ?? "Execution cancelled by operator");
-      }
-    } else if (agentState.status === "failed") {
-      const errorMsg = agentState.termination?.error ?? agentState.termination?.reason ?? "Execution failed";
-      run.failTask(task3Id, errorMsg);
-      run.fail(errorMsg);
-    } else if (agentState.status === "completed") {
-      const summaryMsg = agentState.termination?.output ?? agentState.termination?.reason ?? "Execution completed";
-      run.completeTask(task3Id, summaryMsg);
-
-      // Advance synthesis task
-      run.scheduleTask(task4Id);
-      run.startTask(task4Id);
-      run.completeTask(task4Id, summaryMsg);
-
-      run.complete(summaryMsg);
-    }
-
     // Atomically persist final terminal state and all remaining domain events
-    const finalDto = mapSnapshotToRunDto(run.toSnapshot());
-    const finalEvents = run.pullEvents().map(mapDomainEventToRunEvent);
-    await this.repository.save(finalDto, finalEvents);
+    await persistSnapshot();
 
     this.logger?.info("Execution run terminated", {
       runId,
-      status: finalDto.status,
-      iterations: agentState.iteration,
+      status: run.status,
     });
   }
 

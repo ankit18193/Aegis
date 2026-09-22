@@ -5,6 +5,8 @@ import {
   runSchema,
   runStatusSchema,
   runSummarySchema,
+  taskIdSchema,
+  taskInputSchema,
   workflowIdSchema,
 } from "./runs.js";
 
@@ -12,10 +14,20 @@ import {
 // Run Operation Request & Response Contracts
 // ─────────────────────────────────────────────────────────────────────────────
 
+export const createRunTaskDefinitionSchema = z.object({
+  id: taskIdSchema,
+  name: z.string().min(1),
+  description: z.string().optional(),
+  dependencies: z.array(taskIdSchema).optional(),
+  input: taskInputSchema.optional(),
+});
+export type CreateRunTaskDefinition = z.infer<typeof createRunTaskDefinitionSchema>;
+
 export const createRunRequestSchema = z.object({
   goal: z.string().trim().min(3, "Goal must be at least 3 characters").max(1000, "Goal must not exceed 1000 characters"),
   workflowTemplateId: workflowIdSchema.optional(),
   parameters: z.record(z.unknown()).optional(),
+  tasks: z.array(createRunTaskDefinitionSchema).optional(),
 });
 export type CreateRunRequest = z.infer<typeof createRunRequestSchema>;
 

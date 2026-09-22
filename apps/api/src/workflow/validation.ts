@@ -41,13 +41,13 @@ export function validateWorkflowDefinition(
     return err(new InvalidWorkflowError("Workflow name cannot be empty"));
   }
 
-  if (!Array.isArray(workflow.tasks) || workflow.tasks.length === 0) {
+  if (workflow.tasks.length === 0) {
     return err(new InvalidWorkflowError("Workflow must contain at least one task"));
   }
 
   // Validate individual task fields
   for (const task of workflow.tasks) {
-    if (!task.id || (task.id as string).trim() === "") {
+    if (!task.id || task.id.trim() === "") {
       return err(new InvalidWorkflowError("Task ID cannot be empty"));
     }
 

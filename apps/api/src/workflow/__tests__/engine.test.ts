@@ -5,7 +5,6 @@ import type { CreateRunProps } from "../../domain/run.js";
 import { ExecutionRun } from "../../domain/run.js";
 import { TaskEntity } from "../../domain/task.js";
 import { WorkflowEngine } from "../engine.js";
-import { WorkflowTaskExecutor } from "../task-executor.js";
 import type { ITaskExecutor, WorkflowDefinition } from "../types.js";
 
 function mustCreateRun(props: CreateRunProps): ExecutionRun {
@@ -130,6 +129,7 @@ describe("WorkflowEngine Lifecycle Orchestration", () => {
     it("halts execution, blocks downstream tasks, and fails run when a task fails", async () => {
       const mockFailingExecutor: ITaskExecutor = {
         execute: async (input) => {
+          await Promise.resolve();
           if (input.taskId === "A") {
             return {
               taskId: input.taskId,

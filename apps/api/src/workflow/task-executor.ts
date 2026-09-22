@@ -4,13 +4,16 @@
  * preserving existing Tool System and MCP execution pipelines with zero duplication.
  */
 
+import type { TaskId } from "@aegis/types";
 import { runId as toRunId } from "@aegis/types";
 
 import type { IActionExecutor } from "../agent/action.js";
-import { DeterministicPlanner } from "../agent/planner.js";
+import { DefaultActionExecutor } from "../agent/action.js";
+import { DeterministicPlanner, type IPlanner } from "../agent/planner.js";
 import { DEFAULT_EXECUTION_POLICY, type ExecutionPolicy } from "../agent/policy.js";
 import { AgentRuntime } from "../agent/runtime.js";
 import { AgentState } from "../agent/state.js";
+import { sanitizePayload } from "../tools/safety.js";
 
 import type {
   ITaskExecutor,
@@ -30,9 +33,25 @@ export interface WorkflowTaskExecutorOptions {
   readonly agentRuntime?: AgentRuntime | undefined;
 
   /**
+   * Pluggable planner for iterative agent tasks.
+   */
+  readonly planner?: IPlanner | undefined;
+
+  /**
    * Execution policy applied when creating a default AgentRuntime.
    */
   readonly policy?: ExecutionPolicy | undefined;
+
+  /**
+   * Callback invoked whenever a tool action is executed (directly or via agent runtime).
+   */
+  readonly onToolInvoked?: (
+    toolName: string,
+    input?: Record<string, unknown>,
+    output?: unknown,
+    error?: string,
+    taskId?: TaskId,
+  ) => void | Promise<void>;
 }
 
 /**
@@ -43,12 +62,16 @@ export interface WorkflowTaskExecutorOptions {
 export class WorkflowTaskExecutor implements ITaskExecutor {
   private readonly actionExecutor?: IActionExecutor | undefined;
   private readonly agentRuntime?: AgentRuntime | undefined;
+  private readonly planner?: IPlanner | undefined;
   private readonly policy: ExecutionPolicy;
+  private readonly onToolInvoked?: WorkflowTaskExecutorOptions["onToolInvoked"];
 
   constructor(options: WorkflowTaskExecutorOptions = {}) {
     this.actionExecutor = options.actionExecutor;
     this.agentRuntime = options.agentRuntime;
+    this.planner = options.planner;
     this.policy = options.policy ?? DEFAULT_EXECUTION_POLICY;
+    this.onToolInvoked = options.onToolInvoked;
   }
 
   async execute(
@@ -74,12 +97,14 @@ export class WorkflowTaskExecutor implements ITaskExecutor {
     try {
       // 2. Direct tool action shortcut if specified in staticInput
       if (this.actionExecutor && this.isToolActionInput(input.staticInput)) {
-        const actionName = (input.staticInput as { tool: string }).tool;
-        const rawPayload = (input.staticInput as { payload?: unknown }).payload ?? {};
-        const payload =
+        const actionName = input.staticInput.tool;
+        const rawPayload = input.staticInput.payload;
+        const payload: Record<string, unknown> =
           typeof rawPayload === "object" && rawPayload !== null
             ? (rawPayload as Record<string, unknown>)
-            : { value: rawPayload };
+            : rawPayload !== undefined
+              ? { value: rawPayload }
+              : {};
 
         // Inject dependency outputs into payload if not already present
         const mergedPayload: Record<string, unknown> = {
@@ -91,6 +116,16 @@ export class WorkflowTaskExecutor implements ITaskExecutor {
           name: actionName,
           payload: mergedPayload,
         });
+
+        if (this.onToolInvoked) {
+          await this.onToolInvoked(
+            actionName,
+            sanitizePayload(mergedPayload),
+            execResult.ok && execResult.value.success ? execResult.value.data : undefined,
+            !execResult.ok ? execResult.error.message : execResult.value.error,
+            input.taskId,
+          );
+        }
 
         const durationMs = Date.now() - startTime;
 
@@ -194,49 +229,69 @@ export class WorkflowTaskExecutor implements ITaskExecutor {
     }
   }
 
-  private isToolActionInput(input: unknown): boolean {
+  private isToolActionInput(input: unknown): input is { tool: string; payload?: unknown } {
     return (
       typeof input === "object" &&
       input !== null &&
       "tool" in input &&
-      typeof (input as { tool: unknown }).tool === "string"
+      typeof input.tool === "string"
     );
   }
 
+  private isAgentTask(input: TaskExecutionInput): boolean {
+    if (!this.planner) {
+      return false;
+    }
+    if (input.name === "Distributed Action Execution" || input.taskId.endsWith("-3")) {
+      return true;
+    }
+    if (typeof input.staticInput === "object") {
+      const obj = input.staticInput;
+      if (obj["mode"] === "agent_runtime" || obj["usePlanner"] === true) {
+        return true;
+      }
+    }
+    return false;
+  }
+
   private createDefaultAgentRuntime(input: TaskExecutionInput): AgentRuntime {
-    const planner = new DeterministicPlanner((_state: AgentState) => {
-      // Deterministic single-turn task synthesis
-      const depSummary =
-        Object.keys(input.dependencyOutputs).length > 0
-          ? ` with dependencies [${Object.keys(input.dependencyOutputs).join(", ")}]`
-          : "";
+    const shouldUsePlanner = this.isAgentTask(input);
+    const planner =
+      shouldUsePlanner && this.planner
+        ? this.planner
+        : new DeterministicPlanner((_state: AgentState) => {
+            // Deterministic single-turn task synthesis
+            const depSummary =
+              Object.keys(input.dependencyOutputs).length > 0
+                ? ` with dependencies [${Object.keys(input.dependencyOutputs).join(", ")}]`
+                : "";
 
-      const fullOutput = `Task '${input.name}' completed${depSummary}. Input: ${JSON.stringify(input.staticInput ?? null)}.`;
+            const fullOutput = `Task '${input.name}' completed${depSummary}. Input: ${JSON.stringify(input.staticInput ?? null)}.`;
 
-      return {
-        ok: true,
-        value: {
-          type: "complete",
-          summary: `Task '${input.name}' executed${depSummary}`,
-          output: fullOutput,
-        },
-      };
+            return {
+              ok: true,
+              value: {
+                type: "complete",
+                summary: `Task '${input.name}' executed${depSummary}`,
+                output: fullOutput,
+              },
+            };
+          });
+
+    const executor: IActionExecutor = this.actionExecutor ?? new DefaultActionExecutor();
+
+    return new AgentRuntime(planner, executor, this.policy, {
+      onStep: async (_state, action, observation) => {
+        if (this.onToolInvoked) {
+          await this.onToolInvoked(
+            action.name,
+            sanitizePayload(action.payload),
+            observation.data,
+            observation.error,
+            input.taskId,
+          );
+        }
+      },
     });
-
-    // If actionExecutor exists, use it; otherwise create minimal no-op
-    const executor: IActionExecutor = this.actionExecutor ?? {
-      execute: async () => ({
-        ok: true,
-        value: {
-          actionName: "noop",
-          success: true,
-          data: "noop",
-          durationMs: 0,
-          timestamp: new Date().toISOString(),
-        },
-      }),
-    };
-
-    return new AgentRuntime(planner, executor, this.policy);
   }
 }

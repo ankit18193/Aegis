@@ -5,7 +5,6 @@ import type { CreateRunProps } from "../../domain/run.js";
 import { ExecutionRun } from "../../domain/run.js";
 import { TaskEntity } from "../../domain/task.js";
 import { WorkflowEngine } from "../engine.js";
-import { WorkflowCancelledError } from "../errors.js";
 import type { ITaskExecutor, WorkflowDefinition } from "../types.js";
 
 function mustCreateRun(props: CreateRunProps): ExecutionRun {
@@ -57,6 +56,7 @@ describe("Workflow Cancellation & Terminal State Protection", () => {
 
     const cancellableExecutor: ITaskExecutor = {
       execute: async (input, signal) => {
+        await Promise.resolve();
         if (input.taskId === "A") {
           // Trigger cancellation while task A is executing
           controller.abort("Cancellation mid-task");
@@ -139,7 +139,7 @@ describe("Workflow Cancellation & Terminal State Protection", () => {
     expect(run.status).toBe("completed");
   });
 
-  it("handles duplicate terminal cancel operations gracefully without state corruption", async () => {
+  it("handles duplicate terminal cancel operations gracefully without state corruption", () => {
     const taskA = TaskEntity.create({ id: taskId("A"), name: "Task A" });
     const run = mustCreateRun({
       id: runId("run-dup-cancel"),

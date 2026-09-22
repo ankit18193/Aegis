@@ -7,7 +7,7 @@
 
 import type { TaskId } from "@aegis/types";
 
-import type { BlockedTaskInfo, TaskReadinessReport } from "../domain/readiness.js";
+import type { BlockedTaskInfo } from "../domain/readiness.js";
 import { evaluateTaskReadiness } from "../domain/readiness.js";
 import type { TaskEntity } from "../domain/task.js";
 import type { TaskDag } from "../domain/taskDag.js";

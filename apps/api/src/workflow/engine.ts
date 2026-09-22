@@ -10,10 +10,10 @@ import { err, ok } from "@aegis/types";
 import type { ExecutionRun } from "../domain/run.js";
 
 import { DependencyResolver } from "./dependency-resolver.js";
+import type { WorkflowError } from "./errors.js";
 import {
   InvalidWorkflowError,
   WorkflowCancelledError,
-  WorkflowError,
   WorkflowExecutionFailedError,
 } from "./errors.js";
 import { WorkflowScheduler } from "./scheduler.js";
