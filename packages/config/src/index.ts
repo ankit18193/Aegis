@@ -174,3 +174,61 @@ export function loadAgentConfig(): AgentConfig {
   };
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// Kafka Event Backbone config (Phase 10A: Kafka Event Backbone Foundation)
+// ─────────────────────────────────────────────────────────────────────────────
+
+export interface KafkaConfig {
+  readonly brokers: readonly string[];
+  readonly clientId: string;
+  readonly eventsTopic: string;
+  readonly connectionTimeoutMs: number;
+  readonly requestTimeoutMs: number;
+  readonly maxRetries: number;
+  readonly retryInitialDelayMs: number;
+  readonly retryMaxDelayMs: number;
+}
+
+/**
+ * Reads Kafka event backbone configuration from the environment.
+ */
+export function loadKafkaConfig(env: NodeJS.ProcessEnv = process.env): KafkaConfig {
+  const rawBrokers = env["KAFKA_BROKERS"];
+  const brokers =
+    rawBrokers && rawBrokers.trim().length > 0
+      ? rawBrokers
+          .split(",")
+          .map((b) => b.trim())
+          .filter((b) => b.length > 0)
+      : ["localhost:9092"];
+
+  const clientId = (env["KAFKA_CLIENT_ID"] ?? "aegis-api").trim() || "aegis-api";
+  const eventsTopic = (env["KAFKA_EVENTS_TOPIC"] ?? "aegis.events").trim() || "aegis.events";
+
+  const parseNumber = (
+    val: string | undefined,
+    defaultVal: number,
+    min: number,
+    max: number,
+  ): number => {
+    if (!val) return defaultVal;
+    const parsed = parseInt(val, 10);
+    if (Number.isNaN(parsed) || parsed < min || parsed > max) {
+      return defaultVal;
+    }
+    return parsed;
+  };
+
+  return {
+    brokers: brokers.length > 0 ? brokers : ["localhost:9092"],
+    clientId,
+    eventsTopic,
+    connectionTimeoutMs: parseNumber(env["KAFKA_CONNECTION_TIMEOUT_MS"], 5000, 100, 60000),
+    requestTimeoutMs: parseNumber(env["KAFKA_REQUEST_TIMEOUT_MS"], 30000, 100, 300000),
+    maxRetries: parseNumber(env["KAFKA_MAX_RETRIES"], 5, 0, 20),
+    retryInitialDelayMs: parseNumber(env["KAFKA_RETRY_INITIAL_DELAY_MS"], 100, 10, 10000),
+    retryMaxDelayMs: parseNumber(env["KAFKA_RETRY_MAX_DELAY_MS"], 1000, 100, 60000),
+  };
+}
+
+

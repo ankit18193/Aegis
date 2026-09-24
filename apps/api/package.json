@@ -25,6 +25,7 @@
     "@modelcontextprotocol/sdk": "^1.30.0",
     "drizzle-orm": "^0.45.2",
     "fastify": "^5.12.5",
+    "kafkajs": "^2.2.4",
     "postgres": "^3.4.9",
     "zod": "^3.24.2"
   },

@@ -7,6 +7,7 @@ import {
   loadAgentConfig,
   loadBaseConfig,
   loadDatabaseConfig,
+  loadKafkaConfig,
   optionalEnv,
   requireEnv,
 } from "./index.js";
@@ -119,6 +120,90 @@ describe("@aegis/config", () => {
 
       process.env["AGENT_MAX_ITERATIONS"] = "-3";
       expect(loadAgentConfig().maxIterations).toBe(10);
+    });
+  });
+
+  describe("loadKafkaConfig", () => {
+    it("loads default Kafka configuration when environment variables are unset", () => {
+      delete process.env["KAFKA_BROKERS"];
+      delete process.env["KAFKA_CLIENT_ID"];
+      delete process.env["KAFKA_EVENTS_TOPIC"];
+      delete process.env["KAFKA_CONNECTION_TIMEOUT_MS"];
+      delete process.env["KAFKA_REQUEST_TIMEOUT_MS"];
+      delete process.env["KAFKA_MAX_RETRIES"];
+      delete process.env["KAFKA_RETRY_INITIAL_DELAY_MS"];
+      delete process.env["KAFKA_RETRY_MAX_DELAY_MS"];
+
+      const config = loadKafkaConfig();
+      expect(config.brokers).toEqual(["localhost:9092"]);
+      expect(config.clientId).toBe("aegis-api");
+      expect(config.eventsTopic).toBe("aegis.events");
+      expect(config.connectionTimeoutMs).toBe(5000);
+      expect(config.requestTimeoutMs).toBe(30000);
+      expect(config.maxRetries).toBe(5);
+      expect(config.retryInitialDelayMs).toBe(100);
+      expect(config.retryMaxDelayMs).toBe(1000);
+    });
+
+    it("parses comma-separated broker list and trims whitespace", () => {
+      process.env["KAFKA_BROKERS"] = "broker1:9092, broker2:9092 , broker3:9092 ";
+      const config = loadKafkaConfig();
+      expect(config.brokers).toEqual(["broker1:9092", "broker2:9092", "broker3:9092"]);
+    });
+
+    it("handles whitespace-only broker list by falling back to default", () => {
+      process.env["KAFKA_BROKERS"] = "   ,  ";
+      const config = loadKafkaConfig();
+      expect(config.brokers).toEqual(["localhost:9092"]);
+    });
+
+    it("parses custom client ID and topic", () => {
+      process.env["KAFKA_CLIENT_ID"] = "custom-engine";
+      process.env["KAFKA_EVENTS_TOPIC"] = "engine.events";
+
+      const config = loadKafkaConfig();
+      expect(config.clientId).toBe("custom-engine");
+      expect(config.eventsTopic).toBe("engine.events");
+    });
+
+    it("parses custom numeric configuration", () => {
+      process.env["KAFKA_CONNECTION_TIMEOUT_MS"] = "10000";
+      process.env["KAFKA_REQUEST_TIMEOUT_MS"] = "45000";
+      process.env["KAFKA_MAX_RETRIES"] = "8";
+      process.env["KAFKA_RETRY_INITIAL_DELAY_MS"] = "250";
+      process.env["KAFKA_RETRY_MAX_DELAY_MS"] = "3000";
+
+      const config = loadKafkaConfig();
+      expect(config.connectionTimeoutMs).toBe(10000);
+      expect(config.requestTimeoutMs).toBe(45000);
+      expect(config.maxRetries).toBe(8);
+      expect(config.retryInitialDelayMs).toBe(250);
+      expect(config.retryMaxDelayMs).toBe(3000);
+    });
+
+    it("falls back to defaults for invalid numeric values", () => {
+      process.env["KAFKA_CONNECTION_TIMEOUT_MS"] = "invalid";
+      process.env["KAFKA_REQUEST_TIMEOUT_MS"] = "-50";
+      process.env["KAFKA_MAX_RETRIES"] = "999"; // exceeds max bound 20
+      process.env["KAFKA_RETRY_INITIAL_DELAY_MS"] = "1"; // below min bound 10
+      process.env["KAFKA_RETRY_MAX_DELAY_MS"] = "999999"; // exceeds max bound 60000
+
+      const config = loadKafkaConfig();
+      expect(config.connectionTimeoutMs).toBe(5000);
+      expect(config.requestTimeoutMs).toBe(30000);
+      expect(config.maxRetries).toBe(5);
+      expect(config.retryInitialDelayMs).toBe(100);
+      expect(config.retryMaxDelayMs).toBe(1000);
+    });
+
+    it("accepts custom env object parameter", () => {
+      const customEnv: NodeJS.ProcessEnv = {
+        KAFKA_CLIENT_ID: "isolated-client",
+        KAFKA_BROKERS: "remote:9092",
+      };
+      const config = loadKafkaConfig(customEnv);
+      expect(config.clientId).toBe("isolated-client");
+      expect(config.brokers).toEqual(["remote:9092"]);
     });
   });
 });

@@ -2,8 +2,10 @@ import {
   getNodeEnv,
   loadAgentConfig,
   loadDatabaseConfig,
+  loadKafkaConfig,
   type AgentConfig,
   type DatabaseConfig,
+  type KafkaConfig,
   type NodeEnv,
   optionalEnv,
 } from "@aegis/config";
@@ -19,6 +21,7 @@ export interface ApiServerConfig {
   readonly logLevel: string;
   readonly database: DatabaseConfig;
   readonly agent: AgentConfig;
+  readonly kafka: KafkaConfig;
   readonly mcpServers: readonly McpServerConfig[];
 }
 
@@ -53,6 +56,7 @@ export function loadApiConfig(): ApiServerConfig {
     logLevel: optionalEnv("LOG_LEVEL", "info"),
     database: loadDatabaseConfig(),
     agent: loadAgentConfig(),
+    kafka: loadKafkaConfig(),
     mcpServers: loadMcpConfig(),
   };
 }
