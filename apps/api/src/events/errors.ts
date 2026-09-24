@@ -40,3 +40,32 @@ export class InvalidEnvelopeError extends EventPublishError {
     this.name = "InvalidEnvelopeError";
   }
 }
+
+export class KafkaNotConnectedError extends EventPublishError {
+  constructor(message = "Kafka producer is not connected", cause?: unknown) {
+    super("KAFKA_NOT_CONNECTED", message, cause);
+    this.name = "KafkaNotConnectedError";
+  }
+}
+
+export class KafkaConnectionFailedError extends EventPublishError {
+  constructor(message: string, cause?: unknown) {
+    super("KAFKA_CONNECTION_FAILED", message, cause);
+    this.name = "KafkaConnectionFailedError";
+  }
+}
+
+export class KafkaPublishTimeoutError extends EventPublishError {
+  constructor(message: string, cause?: unknown) {
+    super("KAFKA_PUBLISH_TIMEOUT", message, cause);
+    this.name = "KafkaPublishTimeoutError";
+  }
+}
+
+export class KafkaBrokerUnavailableError extends EventPublishError {
+  constructor(message: string, cause?: unknown) {
+    super("BROKER_UNAVAILABLE", message, cause);
+    this.name = "KafkaBrokerUnavailableError";
+  }
+}
+
