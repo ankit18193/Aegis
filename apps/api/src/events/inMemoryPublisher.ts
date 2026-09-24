@@ -69,6 +69,10 @@ export class InMemoryEventPublisher implements IEventPublisher {
     return [...this._published];
   }
 
+  getEnvelopesByRunId(runId: string): readonly EventEnvelope[] {
+    return this._published.filter((e) => e.aggregateId === runId);
+  }
+
   clear(): void {
     this._published.length = 0;
     this._simulatedError = null;
