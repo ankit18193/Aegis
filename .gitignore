@@ -52,6 +52,7 @@ coverage/
 tmp/
 temp/
 .tmp/
+scratch/
 
 # Docker
 .docker/

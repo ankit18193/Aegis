@@ -74,20 +74,6 @@ export interface WorkflowRecord {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// IEventPublisher (future placeholder)
-// ─────────────────────────────────────────────────────────────────────────────
-
-/**
- * Contract for publishing events to the event bus.
- *
- * NOTE: Forward declaration only. Kafka integration is deferred to a future phase.
- * The concrete implementation will wrap the Kafka producer.
- */
-export interface IEventPublisher {
-  publish(topic: string, payload: unknown): Promise<Result<void>>;
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
 // Canonical Domain Entity Contracts & Schemas
 // ─────────────────────────────────────────────────────────────────────────────
 
