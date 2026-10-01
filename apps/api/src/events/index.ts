@@ -8,3 +8,4 @@ export * from "./envelope.js";
 export * from "./inMemoryPublisher.js";
 export * from "./deduplicator.js";
 export * from "./inMemorySubscriber.js";
+export * from "./publicationService.js";
