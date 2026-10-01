@@ -251,16 +251,20 @@ describe("@aegis/config", () => {
       delete process.env["WORKER_TASK_TYPES"];
       delete process.env["WORKER_TOOLS"];
       delete process.env["WORKER_SHUTDOWN_TIMEOUT_MS"];
+      delete process.env["AEGIS_TASK_RESULT_TOPIC"];
+      delete process.env["AEGIS_WORKER_MAX_CONCURRENT_TASKS"];
 
       const config = loadWorkerConfig();
       expect(config.workerId).toBeUndefined();
       expect(config.workerName).toBe("aegis-worker-1");
       expect(config.maxConcurrency).toBe(1);
+      expect(config.maxConcurrentTasks).toBe(1);
       expect(config.taskTypes).toEqual(["*"]);
       expect(config.tools).toEqual([]);
       expect(config.shutdownTimeoutMs).toBe(10000);
       expect(config.kafkaBrokers).toEqual(["localhost:9092"]);
       expect(config.taskAssignmentTopic).toBe("aegis.tasks.assign");
+      expect(config.taskResultTopic).toBe("aegis.tasks.results");
       expect(config.workerConsumerGroupId).toBe("aegis-workers");
     });
 
@@ -274,32 +278,40 @@ describe("@aegis/config", () => {
       process.env["KAFKA_BROKERS"] = "broker1:9092, broker2:9092";
       process.env["AEGIS_TASK_ASSIGNMENT_TOPIC"] = "custom.tasks.assign";
       process.env["AEGIS_WORKER_CONSUMER_GROUP_ID"] = "custom-worker-group";
+      process.env["AEGIS_TASK_RESULT_TOPIC"] = "custom.tasks.results";
+      process.env["AEGIS_WORKER_MAX_CONCURRENT_TASKS"] = "4";
 
       const config = loadWorkerConfig();
       expect(config.workerId).toBe("worker-custom-99");
       expect(config.workerName).toBe("Custom Analytics Worker");
       expect(config.maxConcurrency).toBe(8);
+      expect(config.maxConcurrentTasks).toBe(4);
       expect(config.taskTypes).toEqual(["analysis", "transform", "summary"]);
       expect(config.tools).toEqual(["calculator", "web_search", "echo"]);
       expect(config.shutdownTimeoutMs).toBe(15000);
       expect(config.kafkaBrokers).toEqual(["broker1:9092", "broker2:9092"]);
       expect(config.taskAssignmentTopic).toBe("custom.tasks.assign");
+      expect(config.taskResultTopic).toBe("custom.tasks.results");
       expect(config.workerConsumerGroupId).toBe("custom-worker-group");
     });
 
     it("falls back to defaults for invalid numeric values or bounds", () => {
       process.env["WORKER_MAX_CONCURRENCY"] = "invalid";
       process.env["WORKER_SHUTDOWN_TIMEOUT_MS"] = "-50";
+      process.env["AEGIS_WORKER_MAX_CONCURRENT_TASKS"] = "invalid";
 
       const config = loadWorkerConfig();
       expect(config.maxConcurrency).toBe(1);
+      expect(config.maxConcurrentTasks).toBe(1);
       expect(config.shutdownTimeoutMs).toBe(10000);
 
       process.env["WORKER_MAX_CONCURRENCY"] = "-3";
       process.env["WORKER_SHUTDOWN_TIMEOUT_MS"] = "999999"; // exceeds 60000 bound
+      process.env["AEGIS_WORKER_MAX_CONCURRENT_TASKS"] = "-2";
 
       const config2 = loadWorkerConfig();
       expect(config2.maxConcurrency).toBe(1);
+      expect(config2.maxConcurrentTasks).toBe(1);
       expect(config2.shutdownTimeoutMs).toBe(10000);
     });
 
@@ -308,12 +320,16 @@ describe("@aegis/config", () => {
         WORKER_ID: "worker-direct-1",
         WORKER_NAME: "Direct Worker",
         WORKER_MAX_CONCURRENCY: "4",
+        AEGIS_TASK_RESULT_TOPIC: "direct.tasks.results",
+        AEGIS_WORKER_MAX_CONCURRENT_TASKS: "2",
       };
 
       const config = loadWorkerConfig(customEnv);
       expect(config.workerId).toBe("worker-direct-1");
       expect(config.workerName).toBe("Direct Worker");
       expect(config.maxConcurrency).toBe(4);
+      expect(config.maxConcurrentTasks).toBe(2);
+      expect(config.taskResultTopic).toBe("direct.tasks.results");
     });
   });
 });

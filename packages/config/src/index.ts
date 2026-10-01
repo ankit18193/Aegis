@@ -262,13 +262,17 @@ export interface WorkerConfig {
   readonly kafkaBrokers: readonly string[];
   readonly taskAssignmentTopic: string;
   readonly workerConsumerGroupId: string;
+  // Worker execution & result reporting configuration (Phase 11C)
+  readonly taskResultTopic: string;
+  readonly maxConcurrentTasks: number;
 }
 
 /**
  * Reads worker configuration from the environment.
  * Maps WORKER_ID, WORKER_NAME, WORKER_MAX_CONCURRENCY, WORKER_TASK_TYPES,
  * WORKER_TOOLS, WORKER_SHUTDOWN_TIMEOUT_MS, KAFKA_BROKERS,
- * AEGIS_TASK_ASSIGNMENT_TOPIC, and AEGIS_WORKER_CONSUMER_GROUP_ID.
+ * AEGIS_TASK_ASSIGNMENT_TOPIC, AEGIS_WORKER_CONSUMER_GROUP_ID,
+ * AEGIS_TASK_RESULT_TOPIC, and AEGIS_WORKER_MAX_CONCURRENT_TASKS.
  */
 export function loadWorkerConfig(env: NodeJS.ProcessEnv = process.env): WorkerConfig {
   const rawId = env["WORKER_ID"];
@@ -322,6 +326,19 @@ export function loadWorkerConfig(env: NodeJS.ProcessEnv = process.env): WorkerCo
     (env["AEGIS_WORKER_CONSUMER_GROUP_ID"] ?? env["WORKER_CONSUMER_GROUP_ID"] ?? "aegis-workers").trim() ||
     "aegis-workers";
 
+  const taskResultTopic =
+    (env["AEGIS_TASK_RESULT_TOPIC"] ?? env["KAFKA_TASK_RESULT_TOPIC"] ?? "aegis.tasks.results").trim() ||
+    "aegis.tasks.results";
+
+  const rawConcurrentTasks = env["AEGIS_WORKER_MAX_CONCURRENT_TASKS"] ?? env["WORKER_MAX_CONCURRENT_TASKS"];
+  const parsedConcurrentTasks = rawConcurrentTasks ? parseInt(rawConcurrentTasks, 10) : undefined;
+  const maxConcurrentTasks =
+    parsedConcurrentTasks !== undefined && !Number.isNaN(parsedConcurrentTasks) && parsedConcurrentTasks >= 1
+      ? parsedConcurrentTasks
+      : maxConcurrency >= 1
+        ? maxConcurrency
+        : 1;
+
   return {
     workerId: workerIdVal,
     workerName,
@@ -332,6 +349,8 @@ export function loadWorkerConfig(env: NodeJS.ProcessEnv = process.env): WorkerCo
     kafkaBrokers: kafkaBrokers.length > 0 ? kafkaBrokers : ["localhost:9092"],
     taskAssignmentTopic,
     workerConsumerGroupId,
+    taskResultTopic,
+    maxConcurrentTasks,
   };
 }
 

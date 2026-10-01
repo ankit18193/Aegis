@@ -119,6 +119,8 @@ describe("Distributed Task Assignment End-to-End Integration (Phase 11B — Comm
         kafkaBrokers: ["localhost:9092"],
         taskAssignmentTopic: "aegis.tasks.assign",
         workerConsumerGroupId: "aegis-workers",
+        taskResultTopic: "aegis.tasks.results",
+        maxConcurrentTasks: 1,
       },
       consumer: taskConsumer,
     });
