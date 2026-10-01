@@ -15,6 +15,7 @@ import type {
   GetRunResponse,
   ListRunsQuery,
   ListRunsResponse,
+  RunEvent,
 } from "@aegis/contracts";
 import { createApiError } from "@aegis/contracts";
 import type { Logger } from "@aegis/logger";
@@ -33,6 +34,7 @@ import { DEFAULT_EXECUTION_POLICY, type ExecutionPolicy } from "../agent/policy.
 import type { AgentState } from "../agent/state.js";
 import { ExecutionRun } from "../domain/run.js";
 import { TaskEntity } from "../domain/task.js";
+import type { EventPublicationService } from "../events/publicationService.js";
 import type { IRunRepository } from "../repositories/runRepository.js";
 import { ToolActionExecutor } from "../tools/adapter.js";
 import { registerBuiltinTools } from "../tools/builtins/index.js";
@@ -65,6 +67,7 @@ export interface AgentRunServiceOptions {
   stepDelayMs?: number | undefined;
   workflowEngine?: IWorkflowEngine | undefined;
   taskExecutor?: ITaskExecutor | undefined;
+  eventPublicationService?: EventPublicationService | undefined;
 }
 
 export class AgentRunService {
@@ -76,12 +79,14 @@ export class AgentRunService {
   private readonly stepDelayMs: number;
   private readonly workflowEngine?: IWorkflowEngine | undefined;
   private readonly taskExecutor?: ITaskExecutor | undefined;
+  private readonly eventPublicationService?: EventPublicationService | undefined;
 
   constructor(
     private readonly repository: IRunRepository,
     private readonly logger?: Logger | undefined,
     options: AgentRunServiceOptions = {},
   ) {
+    this.eventPublicationService = options.eventPublicationService;
     this.planner =
       options.planner ??
       new DeterministicPlanner((state: AgentState) => {
@@ -212,6 +217,7 @@ export class AgentRunService {
 
     // Atomic persistence of run and initial creation event
     await this.repository.save(runDto, initialEvents);
+    await this.publishEventsSafely(initialEvents);
 
     this.logger?.info("Execution run created", {
       runId: runDto.id,
@@ -254,11 +260,12 @@ export class AgentRunService {
 
     const run = ExecutionRun.reconstitute(mapDtoToRunSnapshot(existing));
 
-    // Helper to persist intermediate state atomically
+    // Helper to persist intermediate state atomically and publish post-commit
     const persistSnapshot = async (): Promise<void> => {
       const intermediateDto = mapSnapshotToRunDto(run.toSnapshot());
       const stepEvents = run.pullEvents().map(mapDomainEventToRunEvent);
       await this.repository.save(intermediateDto, stepEvents);
+      await this.publishEventsSafely(stepEvents);
     };
 
     // Construct WorkflowDefinition from reconstituted run
@@ -409,6 +416,7 @@ export class AgentRunService {
 
     // Atomic persistence of cancelled run and cancellation events
     await this.repository.save(updatedDto, events);
+    await this.publishEventsSafely(events);
 
     this.logger?.info("Execution run cancelled", {
       runId: id,
@@ -453,4 +461,32 @@ export class AgentRunService {
   async awaitRunCompletion(runId: RunId, timeoutMs?: number): Promise<void> {
     await this.dispatcher.awaitCompletion(runId, timeoutMs);
   }
+
+  /**
+   * Post-commit failure-contained publication helper.
+   * Publishes events to the event publisher strictly after PostgreSQL persistence succeeds.
+   * If publication fails or throws, logs a structured warning and leaves PostgreSQL state authoritative.
+   */
+  private async publishEventsSafely(events: readonly RunEvent[]): Promise<void> {
+    if (!this.eventPublicationService || events.length === 0) {
+      return;
+    }
+
+    try {
+      const result = await this.eventPublicationService.publishRunEvents(events);
+      if (!result.ok) {
+        this.logger?.warn("Post-commit event publication failed; PostgreSQL state remains authoritative", {
+          error: result.error.message,
+          errorCode: result.error.code,
+          eventCount: events.length,
+        });
+      }
+    } catch (error) {
+      this.logger?.warn("Unexpected error during post-commit event publication; PostgreSQL state remains authoritative", {
+        error: error instanceof Error ? error.message : String(error),
+        eventCount: events.length,
+      });
+    }
+  }
 }
+
