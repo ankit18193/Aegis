@@ -11,6 +11,7 @@
     "clean": "rm -rf dist *.tsbuildinfo",
     "dev": "node --import tsx/esm src/main.ts",
     "start": "node dist/main.js",
+    "test": "vitest run",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
