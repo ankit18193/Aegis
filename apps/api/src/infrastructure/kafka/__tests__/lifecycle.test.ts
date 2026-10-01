@@ -1,11 +1,14 @@
 import type { Logger } from "@aegis/logger";
 import fastify, { type FastifyInstance } from "fastify";
-import type { Producer } from "kafkajs";
+import type { Consumer, Producer } from "kafkajs";
 import type { Mock } from "vitest";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
+import { KafkaEventConsumer } from "../consumer.js";
 import {
+  initializeKafkaConsumer,
   initializeKafkaPublisher,
+  registerKafkaConsumerLifecycleHooks,
   registerKafkaLifecycleHooks,
 } from "../lifecycle.js";
 import { KafkaEventPublisher } from "../publisher.js";
@@ -66,6 +69,44 @@ function createMockProducerBundle(): MockProducerBundle {
     producer,
     connectSpy,
     disconnectSpy,
+  };
+}
+
+interface MockConsumerBundle {
+  readonly consumer: Consumer;
+  readonly connectSpy: Mock<() => Promise<void>>;
+  readonly disconnectSpy: Mock<() => Promise<void>>;
+  readonly subscribeSpy: Mock<() => Promise<void>>;
+  readonly runSpy: Mock<() => Promise<void>>;
+  readonly stopSpy: Mock<() => Promise<void>>;
+}
+
+function createMockConsumerBundle(): MockConsumerBundle {
+  const connectSpy = vi.fn<() => Promise<void>>().mockResolvedValue(undefined);
+  const disconnectSpy = vi.fn<() => Promise<void>>().mockResolvedValue(undefined);
+  const subscribeSpy = vi.fn<() => Promise<void>>().mockResolvedValue(undefined);
+  const runSpy = vi.fn<() => Promise<void>>().mockResolvedValue(undefined);
+  const stopSpy = vi.fn<() => Promise<void>>().mockResolvedValue(undefined);
+
+  const consumer = {
+    connect: connectSpy,
+    disconnect: disconnectSpy,
+    subscribe: subscribeSpy,
+    run: runSpy,
+    stop: stopSpy,
+    commitOffsets: vi.fn().mockResolvedValue(undefined),
+    events: {},
+    on: vi.fn(),
+    logger: vi.fn(),
+  } as unknown as Consumer;
+
+  return {
+    consumer,
+    connectSpy,
+    disconnectSpy,
+    subscribeSpy,
+    runSpy,
+    stopSpy,
   };
 }
 
@@ -190,6 +231,128 @@ describe("Kafka Lifecycle Subsystem", () => {
       expect(loggerBundle.warnSpy).toHaveBeenCalledTimes(1);
       const callArgs = loggerBundle.warnSpy.mock.calls[0];
       expect(callArgs?.[0]).toBe("Failed or timed out while disconnecting Kafka publisher");
+      expect(typeof callArgs?.[1]?.["error"]).toBe("string");
+    });
+  });
+
+  describe("initializeKafkaConsumer (Startup Non-Blocking Failure Containment)", () => {
+    let consumerBundle: MockConsumerBundle;
+    let consumer: KafkaEventConsumer;
+
+    beforeEach(() => {
+      consumerBundle = createMockConsumerBundle();
+      consumer = new KafkaEventConsumer({
+        consumer: consumerBundle.consumer,
+        topic: "aegis.events",
+        logger: loggerBundle.logger,
+      });
+    });
+
+    it("returns true when consumer start succeeds", async () => {
+      const success = await initializeKafkaConsumer(consumer, loggerBundle.logger);
+
+      expect(success).toBe(true);
+      expect(consumer.isRunning).toBe(true);
+      expect(consumerBundle.connectSpy).toHaveBeenCalledTimes(1);
+      expect(consumerBundle.subscribeSpy).toHaveBeenCalledTimes(1);
+      expect(consumerBundle.runSpy).toHaveBeenCalledTimes(1);
+      expect(loggerBundle.infoSpy).toHaveBeenCalled();
+    });
+
+    it("returns false and logs warning when consumer start fails without throwing", async () => {
+      consumerBundle.connectSpy.mockRejectedValueOnce(new Error("Broker connection refused"));
+
+      const success = await initializeKafkaConsumer(consumer, loggerBundle.logger);
+
+      expect(success).toBe(false);
+      expect(consumer.isRunning).toBe(false);
+      expect(loggerBundle.warnSpy).toHaveBeenCalled();
+    });
+
+    it("handles unexpected thrown non-Error values gracefully", async () => {
+      consumerBundle.connectSpy.mockRejectedValueOnce("fatal string failure");
+
+      const success = await initializeKafkaConsumer(consumer, loggerBundle.logger);
+
+      expect(success).toBe(false);
+      expect(consumer.isRunning).toBe(false);
+      expect(loggerBundle.warnSpy).toHaveBeenCalled();
+    });
+  });
+
+  describe("registerKafkaConsumerLifecycleHooks (Shutdown Handling)", () => {
+    let consumerBundle: MockConsumerBundle;
+    let consumer: KafkaEventConsumer;
+
+    beforeEach(() => {
+      consumerBundle = createMockConsumerBundle();
+      consumer = new KafkaEventConsumer({
+        consumer: consumerBundle.consumer,
+        topic: "aegis.events",
+        logger: loggerBundle.logger,
+      });
+    });
+
+    it("skips stop/disconnect on shutdown if consumer was never running", async () => {
+      registerKafkaConsumerLifecycleHooks(app, {
+        consumer,
+        logger: loggerBundle.logger,
+      });
+
+      await app.ready();
+      await app.close();
+
+      expect(consumerBundle.stopSpy).not.toHaveBeenCalled();
+      expect(consumerBundle.disconnectSpy).not.toHaveBeenCalled();
+    });
+
+    it("stops and disconnects consumer cleanly on Fastify close", async () => {
+      await consumer.start();
+
+      registerKafkaConsumerLifecycleHooks(app, {
+        consumer,
+        logger: loggerBundle.logger,
+      });
+
+      await app.ready();
+      await app.close();
+
+      expect(consumerBundle.stopSpy).toHaveBeenCalledTimes(1);
+      expect(consumerBundle.disconnectSpy).toHaveBeenCalledTimes(1);
+      expect(consumer.isRunning).toBe(false);
+    });
+
+    it("handles stop/disconnect error during shutdown without throwing or blocking server close", async () => {
+      await consumer.start();
+      consumerBundle.stopSpy.mockRejectedValueOnce(new Error("Failed to stop consumer group"));
+
+      registerKafkaConsumerLifecycleHooks(app, {
+        consumer,
+        logger: loggerBundle.logger,
+      });
+
+      await app.ready();
+      await expect(app.close()).resolves.toBeUndefined();
+      expect(loggerBundle.warnSpy).toHaveBeenCalled();
+    });
+
+    it("times out if consumer stop hangs", async () => {
+      await consumer.start();
+      consumerBundle.stopSpy.mockImplementationOnce(() => new Promise<void>((_resolve) => {
+        // intentional hang for timeout test
+      }));
+
+      registerKafkaConsumerLifecycleHooks(app, {
+        consumer,
+        logger: loggerBundle.logger,
+        shutdownTimeoutMs: 50,
+      });
+
+      await app.ready();
+      await expect(app.close()).resolves.toBeUndefined();
+      expect(loggerBundle.warnSpy).toHaveBeenCalledTimes(1);
+      const callArgs = loggerBundle.warnSpy.mock.calls[0];
+      expect(callArgs?.[0]).toBe("Failed or timed out while stopping Kafka consumer");
       expect(typeof callArgs?.[1]?.["error"]).toBe("string");
     });
   });

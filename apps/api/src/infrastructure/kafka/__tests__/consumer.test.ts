@@ -192,6 +192,12 @@ describe("Kafka Event Consumer & Dispatcher (Phase 10B)", () => {
       stop: ReturnType<typeof vi.fn>;
       run: ReturnType<typeof vi.fn>;
       commitOffsets: ReturnType<typeof vi.fn>;
+      on: ReturnType<typeof vi.fn>;
+      events: {
+        REBALANCING: string;
+        GROUP_JOIN: string;
+        CRASH: string;
+      };
     };
 
     beforeEach(() => {
@@ -202,6 +208,12 @@ describe("Kafka Event Consumer & Dispatcher (Phase 10B)", () => {
         stop: vi.fn().mockResolvedValue(undefined),
         run: vi.fn().mockResolvedValue(undefined),
         commitOffsets: vi.fn().mockResolvedValue(undefined),
+        on: vi.fn(),
+        events: {
+          REBALANCING: "consumer.rebalancing",
+          GROUP_JOIN: "consumer.group_join",
+          CRASH: "consumer.crash",
+        },
       };
     });
 

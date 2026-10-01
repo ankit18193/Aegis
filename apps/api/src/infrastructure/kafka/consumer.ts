@@ -74,6 +74,22 @@ export class KafkaEventConsumer implements IEventSubscriber {
     this.deduplicator = options.deduplicator;
     this.logger = options.logger;
     this.fromBeginning = options.fromBeginning ?? false;
+
+    this.consumer.on(this.consumer.events.REBALANCING, () => {
+      this.logger?.info("Kafka consumer rebalance initiated", { topic: this.topic });
+    });
+    this.consumer.on(this.consumer.events.GROUP_JOIN, (e) => {
+      this.logger?.info("Kafka consumer joined consumer group", {
+        topic: this.topic,
+        memberId: e.payload.memberId,
+      });
+    });
+    this.consumer.on(this.consumer.events.CRASH, (e) => {
+      this.logger?.error("Kafka consumer crashed", {
+        topic: this.topic,
+        error: e.payload.error instanceof Error ? e.payload.error.message : String(e.payload.error),
+      });
+    });
   }
 
   /**
