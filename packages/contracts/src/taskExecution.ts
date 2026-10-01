@@ -117,6 +117,6 @@ export interface ITaskExecutor {
 export interface ITaskResultPublisher {
   publish(
     result: TaskExecutionResult,
-    metadata?: { readonly correlationId?: string; readonly causationId?: string },
+    metadata?: { readonly correlationId?: string | undefined; readonly causationId?: string | undefined },
   ): Promise<Result<TaskResultEnvelope, TaskExecutionError>>;
 }

@@ -183,8 +183,8 @@ describe("Worker Task Consumer Hardening (Phase 11B — Commit 4)", () => {
     });
   });
 
-  describe("Target-mismatch acknowledgment semantics", () => {
-    it("commits offset and does not accept task when assignment is targeted to different worker", async () => {
+  describe("Target-mismatch acknowledgment semantics (Phase 11C)", () => {
+    it("leaves offset uncommitted and does not accept task when assignment is targeted to different worker", async () => {
       const mismatchedEnvelope: TaskAssignmentEnvelope = {
         ...validEnvelope,
         data: {
@@ -206,14 +206,9 @@ describe("Worker Task Consumer Hardening (Phase 11B — Commit 4)", () => {
       };
 
       const result = await consumer.processMessage(payload);
-      expect(result).toBe(true);
-      expect(mockConsumer.commitOffsets).toHaveBeenCalledWith([
-        {
-          topic: "aegis.tasks.assign",
-          partition: 0,
-          offset: "51",
-        },
-      ]);
+      expect(result).toBe(false);
+      // Offset must NOT be committed to prevent losing work in shared aegis-workers consumer group
+      expect(mockConsumer.commitOffsets).not.toHaveBeenCalled();
       expect(tracker.isDuplicate("asgn-mismatch-99")).toBe(false);
     });
   });

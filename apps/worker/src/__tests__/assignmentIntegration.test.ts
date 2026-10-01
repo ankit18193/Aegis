@@ -178,7 +178,7 @@ describe("Distributed Task Assignment End-to-End Integration (Phase 11B — Comm
       { topic: "aegis.tasks.assign", partition: 0, offset: "102" },
     ]);
 
-    // 5. Wrong-worker assignment -> acknowledged as ignored_not_targeted, offset committed
+    // 5. Wrong-worker assignment -> ignored_not_targeted, offset NOT committed (Phase 11C shared group rule)
     mockKafkaConsumer.commitOffsets.mockClear();
     const wrongWorkerEnvelope: TaskAssignmentEnvelope = {
       ...validEnvelope,
@@ -201,10 +201,8 @@ describe("Distributed Task Assignment End-to-End Integration (Phase 11B — Comm
     };
 
     const res3 = await taskConsumer.processMessage(msg3);
-    expect(res3).toBe(true);
-    expect(mockKafkaConsumer.commitOffsets).toHaveBeenCalledWith([
-      { topic: "aegis.tasks.assign", partition: 1, offset: "201" },
-    ]);
+    expect(res3).toBe(false);
+    expect(mockKafkaConsumer.commitOffsets).not.toHaveBeenCalled();
     // Must NOT be accepted in tracker
     expect(tracker.isDuplicate("asgn-e2e-beta")).toBe(false);
 

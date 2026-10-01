@@ -10,6 +10,7 @@ import { err, ok } from "@aegis/types";
 import type { Consumer, EachMessagePayload } from "kafkajs";
 
 import type { TaskAssignmentHandler } from "../assignment/handler.js";
+import type { TaskExecutionService } from "../execution/executionService.js";
 
 import { deserializeAssignmentEnvelope } from "./serialization.js";
 
@@ -17,6 +18,7 @@ export interface WorkerTaskConsumerOptions {
   readonly consumer: Consumer;
   readonly topic: string;
   readonly handler: TaskAssignmentHandler;
+  readonly executionService?: TaskExecutionService | undefined;
   readonly logger?: Logger | undefined;
   readonly fromBeginning?: boolean | undefined;
   readonly drainTimeoutMs?: number | undefined;
@@ -25,20 +27,22 @@ export interface WorkerTaskConsumerOptions {
 /**
  * WorkerTaskConsumer — Consumes task assignments from Kafka topic.
  *
- * Implements Phase 11B pipeline semantics:
+ * Implements Phase 11C pipeline semantics:
  * 1. Deserializes TaskAssignmentEnvelope from Kafka message
  * 2. Quarantines poison pills (empty or invalid envelopes) with offset commit
  * 3. Dispatches payload to TaskAssignmentHandler
  * 4. Suppresses duplicates with offset commit
- * 5. Handles non-targeted assignments with offset commit (does not block partition)
- * 6. Commits offset strictly upon successful message processing
- * 7. Uncommitted offsets on unexpected handler errors
- * 8. Graceful in-flight message draining upon shutdown
+ * 5. Targeted mismatch -> DOES NOT COMMIT OFFSET to prevent losing work in shared group
+ * 6. Accepted assignment -> Executes via TaskExecutionService -> publishes result to aegis.tasks.results
+ * 7. Commits offset strictly AFTER result publication succeeds (Result-Before-Offset-Commit)
+ * 8. Uncommitted offsets on publication or infrastructure failure
+ * 9. Graceful in-flight task draining upon shutdown
  */
 export class WorkerTaskConsumer {
   private readonly consumer: Consumer;
   private readonly topic: string;
   private readonly handler: TaskAssignmentHandler;
+  private readonly executionService?: TaskExecutionService | undefined;
   private readonly logger?: Logger | undefined;
   private readonly fromBeginning: boolean;
   private readonly drainTimeoutMs: number;
@@ -52,6 +56,7 @@ export class WorkerTaskConsumer {
     this.consumer = options.consumer;
     this.topic = options.topic;
     this.handler = options.handler;
+    this.executionService = options.executionService;
     this.logger = options.logger;
     this.fromBeginning = options.fromBeginning ?? false;
     this.drainTimeoutMs = options.drainTimeoutMs ?? 5000;
@@ -145,6 +150,11 @@ export class WorkerTaskConsumer {
     this._isStopping = true;
 
     try {
+      // Graceful drain: first drain execution service if attached
+      if (this.executionService) {
+        await this.executionService.drain(this.drainTimeoutMs);
+      }
+
       // Graceful drain: wait for in-flight message processing to finish
       const drainStart = Date.now();
       while (this.inFlightMessages > 0 && Date.now() - drainStart < this.drainTimeoutMs) {
@@ -176,13 +186,20 @@ export class WorkerTaskConsumer {
     }
   }
 
+  public getExecutionService(): TaskExecutionService | undefined {
+    return this.executionService;
+  }
+
   /**
-   * Processes a single incoming Kafka message according to the Phase 11B pipeline:
+   * Processes a single incoming Kafka message according to the Phase 11C pipeline:
    * 1. Check for empty payload -> quarantine & commit
    * 2. Deserialization -> quarantine & commit on malformed envelope
-   * 3. TaskAssignmentHandler -> commit on accepted, rejected, or ignored_not_targeted
+   * 3. TaskAssignmentHandler:
+   *    - ignored_not_targeted -> DO NOT COMMIT (prevents work loss in shared consumer group)
+   *    - rejected -> commit offset (unblocks partition)
+   *    - accepted -> execute via TaskExecutionService -> publish result -> commit offset
    * 4. Suppress duplicates -> commit
-   * 5. Unhandled error -> leave offset uncommitted
+   * 5. Unhandled error or publication failure -> leave offset uncommitted
    *
    * @returns true if offset was committed, false if uncommitted
    */
@@ -247,12 +264,84 @@ export class WorkerTaskConsumer {
     }
 
     if (handlingResult.ok) {
-      this.logger?.debug("Task assignment processed successfully; committing offset", {
+      const status = handlingResult.value.status;
+
+      // Phase 11C Rule: Do NOT commit if not targeted to this worker!
+      if (status === "ignored_not_targeted") {
+        this.logger?.warn(
+          "Task assignment targeted to different worker. Offset will NOT be committed to prevent work loss in shared group.",
+          {
+            topic,
+            partition,
+            offset: message.offset,
+            assignmentId: envelope.data.assignmentId,
+            targetWorkerId: envelope.data.workerId,
+          },
+        );
+        return false;
+      }
+
+      // If rejected due to capabilities mismatch, commit to unblock partition
+      if (status === "rejected") {
+        this.logger?.warn("Task assignment rejected due to capabilities mismatch; committing offset", {
+          topic,
+          partition,
+          offset: message.offset,
+          assignmentId: envelope.data.assignmentId,
+          reason: handlingResult.value.reason,
+        });
+        await this.commitOffset(topic, partition, message.offset);
+        return true;
+      }
+
+      // status === "accepted"
+      if (this.executionService) {
+        this.logger?.info("Task assignment accepted; executing and reporting result", {
+          topic,
+          partition,
+          offset: message.offset,
+          assignmentId: envelope.data.assignmentId,
+          taskId: envelope.data.taskId,
+        });
+
+        const execOutcome = await this.executionService.executeAndReport(
+          envelope.data,
+          {
+            correlationId: envelope.correlationId,
+            causationId: envelope.id,
+          },
+        );
+
+        if (!execOutcome.ok) {
+          this.logger?.error("Task result publication failed. Assignment offset will NOT be committed.", {
+            topic,
+            partition,
+            offset: message.offset,
+            assignmentId: envelope.data.assignmentId,
+            taskId: envelope.data.taskId,
+            error: execOutcome.error.message,
+          });
+          return false;
+        }
+
+        this.logger?.info("Task execution completed and result published; committing assignment offset", {
+          topic,
+          partition,
+          offset: message.offset,
+          assignmentId: envelope.data.assignmentId,
+          taskId: envelope.data.taskId,
+          status: execOutcome.value.status,
+        });
+        await this.commitOffset(topic, partition, message.offset);
+        return true;
+      }
+
+      // Backward compatibility when no executionService is attached
+      this.logger?.debug("Task assignment accepted without executionService; committing offset", {
         topic,
         partition,
         offset: message.offset,
         assignmentId: envelope.data.assignmentId,
-        status: handlingResult.value.status,
       });
       await this.commitOffset(topic, partition, message.offset);
       return true;

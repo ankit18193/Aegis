@@ -1,11 +1,27 @@
-import type { TaskAssignmentEnvelope } from "@aegis/contracts";
-import { assignmentId, eventId, runId, taskId, workerId } from "@aegis/types";
+import type {
+  ITaskExecutor,
+  ITaskResultPublisher,
+  TaskAssignmentEnvelope,
+  TaskExecutionResult,
+  TaskResultEnvelope,
+} from "@aegis/contracts";
+import { createTaskExecutionError } from "@aegis/contracts";
+import {
+  assignmentId,
+  err,
+  eventId,
+  ok,
+  runId,
+  taskId,
+  workerId,
+} from "@aegis/types";
 import type { Consumer, EachMessagePayload, KafkaMessage } from "kafkajs";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { TaskAssignmentHandler } from "../../assignment/handler.js";
 import { AssignmentTracker } from "../../assignment/tracker.js";
 import { TaskAssignmentValidator } from "../../assignment/validator.js";
+import { TaskExecutionService } from "../../execution/executionService.js";
 import { WorkerTaskConsumer } from "../taskConsumer.js";
 
 function createMockMessage(overrides: Record<string, unknown> = {}): KafkaMessage {
@@ -203,7 +219,7 @@ describe("WorkerTaskConsumer (Phase 11B — Commit 3)", () => {
     ]);
   });
 
-  it("acknowledges and commits offset for wrong-worker assignment (ignored_not_targeted)", async () => {
+  it("does NOT commit offset for wrong-worker assignment (ignored_not_targeted) to prevent losing work in shared group", async () => {
     const wrongWorkerEnvelope: TaskAssignmentEnvelope = {
       ...validEnvelope,
       data: {
@@ -226,16 +242,10 @@ describe("WorkerTaskConsumer (Phase 11B — Commit 3)", () => {
     };
 
     const committed = await consumer.processMessage(payload);
-    expect(committed).toBe(true);
-    // Offset must be committed so the partition moves forward
-    expect(mockConsumer.commitOffsets).toHaveBeenCalledWith([
-      {
-        topic: "aegis.tasks.assign",
-        partition: 0,
-        offset: "401",
-      },
-    ]);
-    // But it must NOT be recorded as accepted
+    expect(committed).toBe(false);
+    // Offset must NOT be committed so other workers in shared group can consume it
+    expect(mockConsumer.commitOffsets).not.toHaveBeenCalled();
+    // And it must NOT be recorded as accepted
     expect(tracker.isDuplicate("asgn-diff-worker")).toBe(false);
   });
 
@@ -277,4 +287,156 @@ describe("WorkerTaskConsumer (Phase 11B — Commit 3)", () => {
       },
     ]);
   });
+
+  describe("TaskExecutionService integration (Phase 11C)", () => {
+    const sampleExecResult: TaskExecutionResult = {
+      taskId: validEnvelope.data.taskId,
+      runId: validEnvelope.data.runId,
+      assignmentId: validEnvelope.data.assignmentId,
+      workerId: currentWorkerId,
+      status: "SUCCEEDED",
+      output: { summary: "ok" },
+      startedAt: new Date().toISOString(),
+      completedAt: new Date().toISOString(),
+    };
+
+    const sampleResultEnvelope: TaskResultEnvelope = {
+      id: eventId("evt-result-test-1"),
+      source: `aegis.worker.${currentWorkerId}`,
+      type: "task_result",
+      specVersion: "1.0",
+      time: new Date().toISOString(),
+      aggregateType: "TaskResult",
+      aggregateId: validEnvelope.data.taskId,
+      correlationId: validEnvelope.correlationId,
+      causationId: validEnvelope.id,
+      data: sampleExecResult,
+    };
+
+    it("executes accepted assignment and commits offset strictly after result is published", async () => {
+      const mockExecute = vi.fn().mockResolvedValue(sampleExecResult);
+      const mockPublish = vi.fn().mockResolvedValue(ok(sampleResultEnvelope));
+      const mockExecutor: ITaskExecutor = {
+        execute: mockExecute,
+      };
+      const mockPublisher: ITaskResultPublisher = {
+        publish: mockPublish,
+      };
+
+      const executionService = new TaskExecutionService({
+        workerId: currentWorkerId,
+        executor: mockExecutor,
+        publisher: mockPublisher,
+      });
+
+      const consumerWithExec = new WorkerTaskConsumer({
+        consumer: mockConsumer as unknown as Consumer,
+        topic: "aegis.tasks.assign",
+        handler,
+        executionService,
+      });
+
+      const payload: EachMessagePayload = {
+        topic: "aegis.tasks.assign",
+        partition: 0,
+        message: createMockMessage({
+          key: Buffer.from("task-123"),
+          value: Buffer.from(JSON.stringify(validEnvelope)),
+          offset: "600",
+        }),
+        heartbeat: vi.fn(),
+        pause: vi.fn(),
+      };
+
+      const committed = await consumerWithExec.processMessage(payload);
+      expect(committed).toBe(true);
+      expect(mockExecute).toHaveBeenCalledTimes(1);
+      expect(mockPublish).toHaveBeenCalledTimes(1);
+      expect(mockConsumer.commitOffsets).toHaveBeenCalledWith([
+        {
+          topic: "aegis.tasks.assign",
+          partition: 0,
+          offset: "601",
+        },
+      ]);
+    });
+
+    it("leaves offset uncommitted if result publication fails", async () => {
+      const mockExecute = vi.fn().mockResolvedValue(sampleExecResult);
+      const publishError = createTaskExecutionError(
+        "TASK_RESULT_PUBLICATION_FAILED",
+        "Broker disconnected",
+      );
+      const mockPublish = vi.fn().mockResolvedValue(err(publishError));
+      const mockExecutor: ITaskExecutor = {
+        execute: mockExecute,
+      };
+      const mockPublisher: ITaskResultPublisher = {
+        publish: mockPublish,
+      };
+
+      const executionService = new TaskExecutionService({
+        workerId: currentWorkerId,
+        executor: mockExecutor,
+        publisher: mockPublisher,
+      });
+
+      const consumerWithExec = new WorkerTaskConsumer({
+        consumer: mockConsumer as unknown as Consumer,
+        topic: "aegis.tasks.assign",
+        handler,
+        executionService,
+      });
+
+      const payload: EachMessagePayload = {
+        topic: "aegis.tasks.assign",
+        partition: 0,
+        message: createMockMessage({
+          key: Buffer.from("task-123"),
+          value: Buffer.from(JSON.stringify(validEnvelope)),
+          offset: "700",
+        }),
+        heartbeat: vi.fn(),
+        pause: vi.fn(),
+      };
+
+      const committed = await consumerWithExec.processMessage(payload);
+      expect(committed).toBe(false);
+      expect(mockExecute).toHaveBeenCalledTimes(1);
+      expect(mockPublish).toHaveBeenCalledTimes(1);
+      // Offset must NOT be committed
+      expect(mockConsumer.commitOffsets).not.toHaveBeenCalled();
+    });
+
+    it("drains executionService when stopping", async () => {
+      const mockExecutor: ITaskExecutor = {
+        execute: vi.fn().mockResolvedValue(sampleExecResult),
+      };
+      const mockPublisher: ITaskResultPublisher = {
+        publish: vi.fn().mockResolvedValue(ok(sampleResultEnvelope)),
+      };
+
+      const executionService = new TaskExecutionService({
+        workerId: currentWorkerId,
+        executor: mockExecutor,
+        publisher: mockPublisher,
+      });
+
+      const drainSpy = vi.spyOn(executionService, "drain");
+
+      const consumerWithExec = new WorkerTaskConsumer({
+        consumer: mockConsumer as unknown as Consumer,
+        topic: "aegis.tasks.assign",
+        handler,
+        executionService,
+        drainTimeoutMs: 500,
+      });
+
+      await consumerWithExec.start();
+      await consumerWithExec.stop();
+
+      expect(drainSpy).toHaveBeenCalledWith(500);
+    });
+  });
 });
+
