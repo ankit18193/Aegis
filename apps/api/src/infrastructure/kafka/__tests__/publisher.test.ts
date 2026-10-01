@@ -74,6 +74,11 @@ describe("Kafka Infrastructure Subsystem", () => {
           maxRetries: 3,
           retryInitialDelayMs: 100,
           retryMaxDelayMs: 1000,
+          groupId: "test-group",
+          sessionTimeoutMs: 30000,
+          heartbeatIntervalMs: 3000,
+          shutdownTimeoutMs: 10000,
+          fromBeginning: false,
         },
       });
 

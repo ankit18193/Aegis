@@ -130,6 +130,11 @@ describe.runIf(kafkaAvailable)("Kafka Live Broker Integration (Optional Live Bro
         maxRetries: 3,
         retryInitialDelayMs: 100,
         retryMaxDelayMs: 1000,
+        groupId: "aegis-integration-group",
+        sessionTimeoutMs: 30000,
+        heartbeatIntervalMs: 3000,
+        shutdownTimeoutMs: 10000,
+        fromBeginning: false,
       },
     });
 

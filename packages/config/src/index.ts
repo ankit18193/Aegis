@@ -187,6 +187,12 @@ export interface KafkaConfig {
   readonly maxRetries: number;
   readonly retryInitialDelayMs: number;
   readonly retryMaxDelayMs: number;
+  // Consumer configuration (Phase 10B)
+  readonly groupId: string;
+  readonly sessionTimeoutMs: number;
+  readonly heartbeatIntervalMs: number;
+  readonly shutdownTimeoutMs: number;
+  readonly fromBeginning: boolean;
 }
 
 /**
@@ -204,6 +210,8 @@ export function loadKafkaConfig(env: NodeJS.ProcessEnv = process.env): KafkaConf
 
   const clientId = (env["KAFKA_CLIENT_ID"] ?? "aegis-api").trim() || "aegis-api";
   const eventsTopic = (env["KAFKA_EVENTS_TOPIC"] ?? "aegis.events").trim() || "aegis.events";
+  const groupId = (env["KAFKA_GROUP_ID"] ?? "aegis-consumer-group").trim() || "aegis-consumer-group";
+  const fromBeginning = env["KAFKA_FROM_BEGINNING"] === "true";
 
   const parseNumber = (
     val: string | undefined,
@@ -228,6 +236,11 @@ export function loadKafkaConfig(env: NodeJS.ProcessEnv = process.env): KafkaConf
     maxRetries: parseNumber(env["KAFKA_MAX_RETRIES"], 5, 0, 20),
     retryInitialDelayMs: parseNumber(env["KAFKA_RETRY_INITIAL_DELAY_MS"], 100, 10, 10000),
     retryMaxDelayMs: parseNumber(env["KAFKA_RETRY_MAX_DELAY_MS"], 1000, 100, 60000),
+    groupId,
+    sessionTimeoutMs: parseNumber(env["KAFKA_SESSION_TIMEOUT_MS"], 30000, 1000, 300000),
+    heartbeatIntervalMs: parseNumber(env["KAFKA_HEARTBEAT_INTERVAL_MS"], 3000, 100, 60000),
+    shutdownTimeoutMs: parseNumber(env["KAFKA_SHUTDOWN_TIMEOUT_MS"], 10000, 1000, 60000),
+    fromBeginning,
   };
 }
 

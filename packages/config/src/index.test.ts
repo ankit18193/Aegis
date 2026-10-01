@@ -133,6 +133,11 @@ describe("@aegis/config", () => {
       delete process.env["KAFKA_MAX_RETRIES"];
       delete process.env["KAFKA_RETRY_INITIAL_DELAY_MS"];
       delete process.env["KAFKA_RETRY_MAX_DELAY_MS"];
+      delete process.env["KAFKA_GROUP_ID"];
+      delete process.env["KAFKA_SESSION_TIMEOUT_MS"];
+      delete process.env["KAFKA_HEARTBEAT_INTERVAL_MS"];
+      delete process.env["KAFKA_SHUTDOWN_TIMEOUT_MS"];
+      delete process.env["KAFKA_FROM_BEGINNING"];
 
       const config = loadKafkaConfig();
       expect(config.brokers).toEqual(["localhost:9092"]);
@@ -143,6 +148,11 @@ describe("@aegis/config", () => {
       expect(config.maxRetries).toBe(5);
       expect(config.retryInitialDelayMs).toBe(100);
       expect(config.retryMaxDelayMs).toBe(1000);
+      expect(config.groupId).toBe("aegis-consumer-group");
+      expect(config.sessionTimeoutMs).toBe(30000);
+      expect(config.heartbeatIntervalMs).toBe(3000);
+      expect(config.shutdownTimeoutMs).toBe(10000);
+      expect(config.fromBeginning).toBe(false);
     });
 
     it("parses comma-separated broker list and trims whitespace", () => {
@@ -181,12 +191,30 @@ describe("@aegis/config", () => {
       expect(config.retryMaxDelayMs).toBe(3000);
     });
 
+    it("parses custom consumer configuration (Phase 10B)", () => {
+      process.env["KAFKA_GROUP_ID"] = "custom-consumer-group";
+      process.env["KAFKA_SESSION_TIMEOUT_MS"] = "45000";
+      process.env["KAFKA_HEARTBEAT_INTERVAL_MS"] = "5000";
+      process.env["KAFKA_SHUTDOWN_TIMEOUT_MS"] = "15000";
+      process.env["KAFKA_FROM_BEGINNING"] = "true";
+
+      const config = loadKafkaConfig();
+      expect(config.groupId).toBe("custom-consumer-group");
+      expect(config.sessionTimeoutMs).toBe(45000);
+      expect(config.heartbeatIntervalMs).toBe(5000);
+      expect(config.shutdownTimeoutMs).toBe(15000);
+      expect(config.fromBeginning).toBe(true);
+    });
+
     it("falls back to defaults for invalid numeric values", () => {
       process.env["KAFKA_CONNECTION_TIMEOUT_MS"] = "invalid";
       process.env["KAFKA_REQUEST_TIMEOUT_MS"] = "-50";
       process.env["KAFKA_MAX_RETRIES"] = "999"; // exceeds max bound 20
       process.env["KAFKA_RETRY_INITIAL_DELAY_MS"] = "1"; // below min bound 10
       process.env["KAFKA_RETRY_MAX_DELAY_MS"] = "999999"; // exceeds max bound 60000
+      process.env["KAFKA_SESSION_TIMEOUT_MS"] = "invalid";
+      process.env["KAFKA_HEARTBEAT_INTERVAL_MS"] = "-10";
+      process.env["KAFKA_SHUTDOWN_TIMEOUT_MS"] = "999999"; // exceeds max bound 60000
 
       const config = loadKafkaConfig();
       expect(config.connectionTimeoutMs).toBe(5000);
@@ -194,16 +222,23 @@ describe("@aegis/config", () => {
       expect(config.maxRetries).toBe(5);
       expect(config.retryInitialDelayMs).toBe(100);
       expect(config.retryMaxDelayMs).toBe(1000);
+      expect(config.sessionTimeoutMs).toBe(30000);
+      expect(config.heartbeatIntervalMs).toBe(3000);
+      expect(config.shutdownTimeoutMs).toBe(10000);
     });
 
     it("accepts custom env object parameter", () => {
       const customEnv: NodeJS.ProcessEnv = {
         KAFKA_CLIENT_ID: "isolated-client",
         KAFKA_BROKERS: "remote:9092",
+        KAFKA_GROUP_ID: "isolated-group",
+        KAFKA_FROM_BEGINNING: "true",
       };
       const config = loadKafkaConfig(customEnv);
       expect(config.clientId).toBe("isolated-client");
       expect(config.brokers).toEqual(["remote:9092"]);
+      expect(config.groupId).toBe("isolated-group");
+      expect(config.fromBeginning).toBe(true);
     });
   });
 });
