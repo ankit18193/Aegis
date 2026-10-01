@@ -25,6 +25,9 @@ export type TaskId = Brand<string, "TaskId">;
 /** A unique identifier for a Worker node. */
 export type WorkerId = Brand<string, "WorkerId">;
 
+/** A unique identifier for a Task Assignment. */
+export type AssignmentId = Brand<string, "AssignmentId">;
+
 /**
  * Creates a branded RunId from a raw string.
  * Use this at trust boundaries (e.g., when reading from an API or database).
@@ -67,6 +70,13 @@ export function taskId(raw: string): TaskId {
  */
 export function workerId(raw: string): WorkerId {
   return raw as WorkerId;
+}
+
+/**
+ * Creates a branded AssignmentId from a raw string.
+ */
+export function assignmentId(raw: string): AssignmentId {
+  return raw as AssignmentId;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

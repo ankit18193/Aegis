@@ -83,5 +83,6 @@ export * from "./api.js";
 export * from "./errors.js";
 export * from "./client.js";
 export * from "./worker.js";
+export * from "./taskAssignment.js";
 
 
