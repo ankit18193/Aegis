@@ -19,6 +19,7 @@ export interface WorkerTaskConsumerOptions {
   readonly handler: TaskAssignmentHandler;
   readonly logger?: Logger | undefined;
   readonly fromBeginning?: boolean | undefined;
+  readonly drainTimeoutMs?: number | undefined;
 }
 
 /**
@@ -32,6 +33,7 @@ export interface WorkerTaskConsumerOptions {
  * 5. Handles non-targeted assignments with offset commit (does not block partition)
  * 6. Commits offset strictly upon successful message processing
  * 7. Uncommitted offsets on unexpected handler errors
+ * 8. Graceful in-flight message draining upon shutdown
  */
 export class WorkerTaskConsumer {
   private readonly consumer: Consumer;
@@ -39,9 +41,12 @@ export class WorkerTaskConsumer {
   private readonly handler: TaskAssignmentHandler;
   private readonly logger?: Logger | undefined;
   private readonly fromBeginning: boolean;
+  private readonly drainTimeoutMs: number;
 
   private _isRunning = false;
   private _isStarting = false;
+  private _isStopping = false;
+  private inFlightMessages = 0;
 
   constructor(options: WorkerTaskConsumerOptions) {
     this.consumer = options.consumer;
@@ -49,6 +54,7 @@ export class WorkerTaskConsumer {
     this.handler = options.handler;
     this.logger = options.logger;
     this.fromBeginning = options.fromBeginning ?? false;
+    this.drainTimeoutMs = options.drainTimeoutMs ?? 5000;
 
     this.consumer.on(this.consumer.events.REBALANCING, () => {
       this.logger?.info("Worker Kafka consumer rebalance initiated", {
@@ -76,6 +82,10 @@ export class WorkerTaskConsumer {
 
   public get isRunning(): boolean {
     return this._isRunning;
+  }
+
+  public get activeMessageCount(): number {
+    return this.inFlightMessages;
   }
 
   /**
@@ -125,17 +135,27 @@ export class WorkerTaskConsumer {
 
   /**
    * Gracefully stops the Kafka consumer and disconnects.
+   * Drains in-flight messages up to drainTimeoutMs before disconnecting.
    */
   public async stop(): Promise<Result<void, AssignmentErrorContract>> {
     if (!this._isRunning && !this._isStarting) {
       return ok(undefined);
     }
 
+    this._isStopping = true;
+
     try {
+      // Graceful drain: wait for in-flight message processing to finish
+      const drainStart = Date.now();
+      while (this.inFlightMessages > 0 && Date.now() - drainStart < this.drainTimeoutMs) {
+        await new Promise((resolve) => setTimeout(resolve, 25));
+      }
+
       await this.consumer.stop();
       await this.consumer.disconnect();
       this._isRunning = false;
       this._isStarting = false;
+      this._isStopping = false;
       this.logger?.info("WorkerTaskConsumer stopped cleanly", {
         topic: this.topic,
       });
@@ -143,6 +163,7 @@ export class WorkerTaskConsumer {
     } catch (error) {
       this._isRunning = false;
       this._isStarting = false;
+      this._isStopping = false;
       const wrapped = createAssignmentError(
         "INVALID_ASSIGNMENT_ENVELOPE",
         `Error stopping WorkerTaskConsumer: ${error instanceof Error ? error.message : String(error)}`,
@@ -166,6 +187,15 @@ export class WorkerTaskConsumer {
    * @returns true if offset was committed, false if uncommitted
    */
   public async processMessage(payload: EachMessagePayload): Promise<boolean> {
+    this.inFlightMessages++;
+    try {
+      return await this.handleMessageInternal(payload);
+    } finally {
+      this.inFlightMessages--;
+    }
+  }
+
+  private async handleMessageInternal(payload: EachMessagePayload): Promise<boolean> {
     const { topic, partition, message } = payload;
 
     if (!message.value) {
@@ -195,8 +225,26 @@ export class WorkerTaskConsumer {
 
     const envelope = deserResult.value;
 
-    // 2. Handling
-    const handlingResult = this.handler.handleAssignment(envelope.data);
+    // 2. Handling with safe exception containment
+    let handlingResult;
+    try {
+      handlingResult = this.handler.handleAssignment(envelope.data);
+    } catch (unhandledException) {
+      this.logger?.error(
+        "TaskAssignmentHandler threw an unhandled exception. Offset will NOT be committed.",
+        {
+          topic,
+          partition,
+          offset: message.offset,
+          assignmentId: envelope.data.assignmentId,
+          error:
+            unhandledException instanceof Error
+              ? unhandledException.message
+              : String(unhandledException),
+        },
+      );
+      return false;
+    }
 
     if (handlingResult.ok) {
       this.logger?.debug("Task assignment processed successfully; committing offset", {
