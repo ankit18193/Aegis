@@ -9,3 +9,4 @@ export * from "./inMemoryPublisher.js";
 export * from "./deduplicator.js";
 export * from "./inMemorySubscriber.js";
 export * from "./publicationService.js";
+export * from "./subscribers/auditSubscriber.js";
