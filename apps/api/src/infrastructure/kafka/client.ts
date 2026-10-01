@@ -5,7 +5,7 @@
 
 import type { KafkaConfig } from "@aegis/config";
 import type { Logger } from "@aegis/logger";
-import { Kafka, Partitioners, type Producer } from "kafkajs";
+import { Kafka, Partitioners, type Consumer, type Producer } from "kafkajs";
 
 export interface KafkaClientManagerOptions {
   readonly config: KafkaConfig;
@@ -17,6 +17,7 @@ export class KafkaClientManager {
   private readonly config: KafkaConfig;
   private readonly logger?: Logger | undefined;
   private producer: Producer | null = null;
+  private consumer: Consumer | null = null;
 
   constructor(options: KafkaClientManagerOptions) {
     this.config = options.config;
@@ -42,6 +43,21 @@ export class KafkaClientManager {
       transactionTimeout: 30000,
     });
     return this.producer;
+  }
+
+  getConsumer(customGroupId?: string): Consumer {
+    const groupId = customGroupId ?? this.config.groupId;
+    this.consumer ??= this.kafka.consumer({
+      groupId,
+      sessionTimeout: this.config.sessionTimeoutMs,
+      heartbeatInterval: this.config.heartbeatIntervalMs,
+      retry: {
+        maxRetryTime: this.config.retryMaxDelayMs,
+        initialRetryTime: this.config.retryInitialDelayMs,
+        retries: this.config.maxRetries,
+      },
+    });
+    return this.consumer;
   }
 
   getKafka(): Kafka {
