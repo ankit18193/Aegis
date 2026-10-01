@@ -4,13 +4,21 @@
  */
 
 export type {
+  ConsumerRecordMetadata,
+  EventConsumerErrorCode,
+  EventConsumerErrorContract,
+  EventHandler,
+  IEventDeduplicator,
+  IEventPublisher,
+  IEventSubscriber,
   EventEnvelope,
   EventPublishErrorCode,
   EventPublishErrorContract,
   EventPublishResult,
-  IEventPublisher,
 } from "@aegis/contracts";
 export {
+  consumerRecordMetadataSchema,
+  eventConsumerErrorCodeSchema,
   eventEnvelopeSchema,
   eventPublishErrorCodeSchema,
   eventPublishResultSchema,

@@ -104,3 +104,62 @@ export interface IEventPublisher {
   ): Promise<Result<readonly EventPublishResult[], EventPublishErrorContract>>;
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// Event Consumer & Subscriber Contracts (Phase 10B)
+// ─────────────────────────────────────────────────────────────────────────────
+
+export const consumerRecordMetadataSchema = z.object({
+  topic: z.string().min(1),
+  partition: z.number().int().nonnegative(),
+  offset: z.string(),
+  timestamp: z.string(),
+  key: z.string().optional(),
+});
+export type ConsumerRecordMetadata = z.infer<typeof consumerRecordMetadataSchema>;
+
+export const eventConsumerErrorCodeSchema = z.enum([
+  "CONSUMER_NOT_CONNECTED",
+  "SUBSCRIPTION_FAILED",
+  "HANDLER_FAILED",
+  "DESERIALIZATION_FAILED",
+  "INVALID_ENVELOPE",
+  "DUPLICATE_EVENT",
+  "DISPATCH_ERROR",
+]);
+export type EventConsumerErrorCode = z.infer<typeof eventConsumerErrorCodeSchema>;
+
+export interface EventConsumerErrorContract {
+  readonly code: EventConsumerErrorCode;
+  readonly message: string;
+  readonly cause?: unknown;
+}
+
+export type EventHandler<T = EventEnvelope> = (
+  envelope: T,
+  metadata: ConsumerRecordMetadata,
+) => Promise<Result<void, EventConsumerErrorContract>>;
+
+/**
+ * Single canonical contract for consuming and subscribing to domain events across Aegis.
+ * Decouples platform handlers from specific broker transport implementations.
+ */
+export interface IEventSubscriber {
+  subscribe(type: EventType | "*", handler: EventHandler): void;
+  unsubscribe(type: EventType | "*", handler: EventHandler): void;
+  start(): Promise<Result<void, EventConsumerErrorContract>>;
+  stop(): Promise<Result<void, EventConsumerErrorContract>>;
+  readonly isRunning: boolean;
+}
+
+/**
+ * Contract for in-process event deduplication.
+ * Best-effort in-process duplicate suppression for at-least-once delivery,
+ * not a durable exactly-once guarantee.
+ */
+export interface IEventDeduplicator {
+  isDuplicate(eventId: string): boolean;
+  clear(): void;
+  readonly size: number;
+}
+
+

@@ -2,6 +2,8 @@ import { eventId, runId, taskId } from "@aegis/types";
 import { describe, expect, it } from "vitest";
 
 import {
+  consumerRecordMetadataSchema,
+  eventConsumerErrorCodeSchema,
   eventEnvelopeSchema,
   eventPublishErrorCodeSchema,
   eventPublishResultSchema,
@@ -166,6 +168,46 @@ describe("Event Contracts & Schemas", () => {
         expect(eventPublishErrorCodeSchema.parse(code)).toBe(code);
       }
       expect(() => eventPublishErrorCodeSchema.parse("UNKNOWN_CODE")).toThrow();
+    });
+  });
+
+  describe("Consumer Contracts & Schemas (Phase 10B)", () => {
+    it("validates consumerRecordMetadataSchema with optional key", () => {
+      const metadata = consumerRecordMetadataSchema.parse({
+        topic: "aegis.events",
+        partition: 0,
+        offset: "42",
+        timestamp: "2026-09-24T12:00:00.000Z",
+        key: "run-123",
+      });
+      expect(metadata.topic).toBe("aegis.events");
+      expect(metadata.partition).toBe(0);
+      expect(metadata.offset).toBe("42");
+      expect(metadata.key).toBe("run-123");
+
+      const withoutKey = consumerRecordMetadataSchema.parse({
+        topic: "aegis.events",
+        partition: 1,
+        offset: "100",
+        timestamp: "2026-09-24T12:00:00.000Z",
+      });
+      expect(withoutKey.key).toBeUndefined();
+    });
+
+    it("validates all canonical event consumer error codes", () => {
+      const codes = [
+        "CONSUMER_NOT_CONNECTED",
+        "SUBSCRIPTION_FAILED",
+        "HANDLER_FAILED",
+        "DESERIALIZATION_FAILED",
+        "INVALID_ENVELOPE",
+        "DUPLICATE_EVENT",
+        "DISPATCH_ERROR",
+      ];
+      for (const code of codes) {
+        expect(eventConsumerErrorCodeSchema.parse(code)).toBe(code);
+      }
+      expect(() => eventConsumerErrorCodeSchema.parse("INVALID_CODE")).toThrow();
     });
   });
 });
