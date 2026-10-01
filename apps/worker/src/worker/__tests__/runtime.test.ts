@@ -140,4 +140,31 @@ describe("WorkerRuntime (Phase 11A — Commit 2)", () => {
       expect(restartResult.error.code).toBe("WORKER_INVALID_STATE");
     }
   });
+
+  it("handles concurrent stop calls cleanly without race conditions", async () => {
+    let stopHookCallCount = 0;
+    const runtime = new WorkerRuntime({
+      onStop: async () => {
+        stopHookCallCount++;
+        await new Promise((resolve) => setTimeout(resolve, 20));
+      },
+    });
+
+    await runtime.start();
+    expect(runtime.getState()).toBe("ready");
+
+    // Launch multiple concurrent stop calls
+    const [res1, res2, res3] = await Promise.all([
+      runtime.stop(),
+      runtime.stop(),
+      runtime.stop(),
+    ]);
+
+    expect(res1.ok).toBe(true);
+    expect(res2.ok).toBe(true);
+    expect(res3.ok).toBe(true);
+    expect(stopHookCallCount).toBe(1);
+    expect(runtime.getState()).toBe("stopped");
+  });
 });
+

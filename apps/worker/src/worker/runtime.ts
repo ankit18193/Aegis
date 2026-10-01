@@ -30,6 +30,7 @@ export class WorkerRuntime implements IWorkerRuntime {
   private readonly logger?: Logger | undefined;
   private readonly onStart?: (() => Promise<void> | void) | undefined;
   private readonly onStop?: (() => Promise<void> | void) | undefined;
+  private stopPromise?: Promise<Result<void, WorkerErrorContract>> | undefined;
 
   constructor(options: WorkerRuntimeOptions = {}) {
     this.lifecycle = new WorkerLifecycleManager("starting");
@@ -121,9 +122,17 @@ export class WorkerRuntime implements IWorkerRuntime {
   /**
    * Gracefully stops the worker runtime.
    * Transitions ready -> draining -> stopped.
-   * Idempotent: safe to call multiple times.
+   * Idempotent & reentrant: concurrent callers await the same shutdown operation.
    */
   public async stop(): Promise<Result<void, WorkerErrorContract>> {
+    if (this.stopPromise) {
+      return this.stopPromise;
+    }
+    this.stopPromise = this.performStop();
+    return this.stopPromise;
+  }
+
+  private async performStop(): Promise<Result<void, WorkerErrorContract>> {
     const currentState = this.getState();
 
     if (currentState === "stopped") {
