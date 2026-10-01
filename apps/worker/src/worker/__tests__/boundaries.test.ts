@@ -15,7 +15,7 @@ const workerSrcDir = path.resolve(__dirname, "../../");
 const workerPackageJsonPath = path.resolve(workerSrcDir, "../package.json");
 
 describe("Worker Architectural Boundary Isolation (Phase 11A — Commit 5)", () => {
-  it("apps/worker package.json does not declare database, redis, or agent-runtime dependencies", () => {
+  it("apps/worker package.json does not declare database, redis, or workflow-engine dependencies", () => {
     const raw = fs.readFileSync(workerPackageJsonPath, "utf-8");
     const pkg = JSON.parse(raw) as {
       dependencies?: Record<string, string>;
@@ -27,17 +27,16 @@ describe("Worker Architectural Boundary Isolation (Phase 11A — Commit 5)", () 
     const allDeps = [...deps, ...devDeps];
 
     expect(allDeps).not.toContain("@aegis/db");
-    expect(allDeps).not.toContain("@aegis/agent-runtime");
     expect(allDeps).not.toContain("@prisma/client");
     expect(allDeps).not.toContain("prisma");
     expect(allDeps).not.toContain("ioredis");
+    expect(allDeps).toContain("@aegis/agent-runtime");
     expect(allDeps).toContain("kafkajs");
   });
 
   it("apps/worker source code never imports forbidden platform layers", () => {
     const forbiddenImports = [
       "@aegis/db",
-      "@aegis/agent-runtime",
       "@prisma/client",
       "prisma",
       "ioredis",

@@ -1,10 +1,6 @@
 /**
  * Agent Runtime primitives barrel export.
+ * Re-exports canonical @aegis/agent-runtime package for backward compatibility.
  */
 
-export * from "./action.js";
-export * from "./model.js";
-export * from "./planner.js";
-export * from "./policy.js";
-export * from "./runtime.js";
-export * from "./state.js";
+export * from "@aegis/agent-runtime";

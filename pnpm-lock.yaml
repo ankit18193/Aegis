@@ -199,6 +199,9 @@ importers:
 
   apps/api:
     dependencies:
+      '@aegis/agent-runtime':
+        specifier: workspace:*
+        version: link:../../packages/agent-runtime
       '@aegis/config':
         specifier: workspace:*
         version: link:../../packages/config
@@ -324,6 +327,9 @@ importers:
 
   apps/worker:
     dependencies:
+      '@aegis/agent-runtime':
+        specifier: workspace:*
+        version: link:../../packages/agent-runtime
       '@aegis/config':
         specifier: workspace:*
         version: link:../../packages/config
@@ -346,6 +352,19 @@ importers:
       tsx:
         specifier: ^4.0.0
         version: 4.23.13
+      typescript:
+        specifier: '*'
+        version: 5.9.3
+
+  packages/agent-runtime:
+    dependencies:
+      '@aegis/foundation':
+        specifier: workspace:*
+        version: link:../foundation
+      '@aegis/types':
+        specifier: workspace:*
+        version: link:../types
+    devDependencies:
       typescript:
         specifier: '*'
         version: 5.9.3

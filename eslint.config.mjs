@@ -43,6 +43,7 @@ const config = [
           "./packages/contracts/tsconfig.json",
           "./packages/config/tsconfig.json",
           "./packages/logger/tsconfig.json",
+          "./packages/agent-runtime/tsconfig.json",
           "./apps/api/tsconfig.json",
           "./apps/worker/tsconfig.json",
           "./apps/console/tsconfig.json",

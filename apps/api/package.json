@@ -16,6 +16,7 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
+    "@aegis/agent-runtime": "workspace:*",
     "@aegis/config": "workspace:*",
     "@aegis/contracts": "workspace:*",
     "@aegis/foundation": "workspace:*",

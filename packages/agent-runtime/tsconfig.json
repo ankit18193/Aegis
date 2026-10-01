@@ -11,11 +11,7 @@
   "include": ["src/**/*.ts"],
   "exclude": ["node_modules", "dist"],
   "references": [
-    { "path": "../../packages/foundation" },
-    { "path": "../../packages/types" },
-    { "path": "../../packages/contracts" },
-    { "path": "../../packages/config" },
-    { "path": "../../packages/logger" },
-    { "path": "../../packages/agent-runtime" }
+    { "path": "../foundation" },
+    { "path": "../types" }
   ]
 }
