@@ -8,6 +8,7 @@ import {
   loadBaseConfig,
   loadDatabaseConfig,
   loadKafkaConfig,
+  loadWorkerConfig,
   optionalEnv,
   requireEnv,
 } from "./index.js";
@@ -239,6 +240,71 @@ describe("@aegis/config", () => {
       expect(config.brokers).toEqual(["remote:9092"]);
       expect(config.groupId).toBe("isolated-group");
       expect(config.fromBeginning).toBe(true);
+    });
+  });
+
+  describe("loadWorkerConfig", () => {
+    it("loads default worker configuration when environment variables are unset", () => {
+      delete process.env["WORKER_ID"];
+      delete process.env["WORKER_NAME"];
+      delete process.env["WORKER_MAX_CONCURRENCY"];
+      delete process.env["WORKER_TASK_TYPES"];
+      delete process.env["WORKER_TOOLS"];
+      delete process.env["WORKER_SHUTDOWN_TIMEOUT_MS"];
+
+      const config = loadWorkerConfig();
+      expect(config.workerId).toBeUndefined();
+      expect(config.workerName).toBe("aegis-worker-1");
+      expect(config.maxConcurrency).toBe(1);
+      expect(config.taskTypes).toEqual(["*"]);
+      expect(config.tools).toEqual([]);
+      expect(config.shutdownTimeoutMs).toBe(10000);
+    });
+
+    it("parses custom worker configuration and trims strings", () => {
+      process.env["WORKER_ID"] = "worker-custom-99";
+      process.env["WORKER_NAME"] = "Custom Analytics Worker";
+      process.env["WORKER_MAX_CONCURRENCY"] = "8";
+      process.env["WORKER_TASK_TYPES"] = "analysis, transform , summary ";
+      process.env["WORKER_TOOLS"] = "calculator, web_search , echo ";
+      process.env["WORKER_SHUTDOWN_TIMEOUT_MS"] = "15000";
+
+      const config = loadWorkerConfig();
+      expect(config.workerId).toBe("worker-custom-99");
+      expect(config.workerName).toBe("Custom Analytics Worker");
+      expect(config.maxConcurrency).toBe(8);
+      expect(config.taskTypes).toEqual(["analysis", "transform", "summary"]);
+      expect(config.tools).toEqual(["calculator", "web_search", "echo"]);
+      expect(config.shutdownTimeoutMs).toBe(15000);
+    });
+
+    it("falls back to defaults for invalid numeric values or bounds", () => {
+      process.env["WORKER_MAX_CONCURRENCY"] = "invalid";
+      process.env["WORKER_SHUTDOWN_TIMEOUT_MS"] = "-50";
+
+      const config = loadWorkerConfig();
+      expect(config.maxConcurrency).toBe(1);
+      expect(config.shutdownTimeoutMs).toBe(10000);
+
+      process.env["WORKER_MAX_CONCURRENCY"] = "-3";
+      process.env["WORKER_SHUTDOWN_TIMEOUT_MS"] = "999999"; // exceeds 60000 bound
+
+      const config2 = loadWorkerConfig();
+      expect(config2.maxConcurrency).toBe(1);
+      expect(config2.shutdownTimeoutMs).toBe(10000);
+    });
+
+    it("accepts custom env parameter directly", () => {
+      const customEnv: NodeJS.ProcessEnv = {
+        WORKER_ID: "worker-direct-1",
+        WORKER_NAME: "Direct Worker",
+        WORKER_MAX_CONCURRENCY: "4",
+      };
+
+      const config = loadWorkerConfig(customEnv);
+      expect(config.workerId).toBe("worker-direct-1");
+      expect(config.workerName).toBe("Direct Worker");
+      expect(config.maxConcurrency).toBe(4);
     });
   });
 });

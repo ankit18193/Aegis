@@ -14,6 +14,9 @@
 import fs from "node:fs";
 import path from "node:path";
 
+import type { WorkerId } from "@aegis/types";
+import { workerId } from "@aegis/types";
+
 // ─────────────────────────────────────────────────────────────────────────────
 // Environment helpers
 // ─────────────────────────────────────────────────────────────────────────────
@@ -241,6 +244,69 @@ export function loadKafkaConfig(env: NodeJS.ProcessEnv = process.env): KafkaConf
     heartbeatIntervalMs: parseNumber(env["KAFKA_HEARTBEAT_INTERVAL_MS"], 3000, 100, 60000),
     shutdownTimeoutMs: parseNumber(env["KAFKA_SHUTDOWN_TIMEOUT_MS"], 10000, 1000, 60000),
     fromBeginning,
+  };
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Worker config (Phase 11A: Worker Foundation)
+// ─────────────────────────────────────────────────────────────────────────────
+
+export interface WorkerConfig {
+  readonly workerId?: WorkerId | undefined;
+  readonly workerName: string;
+  readonly maxConcurrency: number;
+  readonly taskTypes: readonly string[];
+  readonly tools: readonly string[];
+  readonly shutdownTimeoutMs: number;
+}
+
+/**
+ * Reads worker configuration from the environment.
+ * Maps WORKER_ID, WORKER_NAME, WORKER_MAX_CONCURRENCY, WORKER_TASK_TYPES,
+ * WORKER_TOOLS, and WORKER_SHUTDOWN_TIMEOUT_MS.
+ */
+export function loadWorkerConfig(env: NodeJS.ProcessEnv = process.env): WorkerConfig {
+  const rawId = env["WORKER_ID"];
+  const workerIdVal = rawId && rawId.trim().length > 0 ? workerId(rawId.trim()) : undefined;
+  const workerName = (env["WORKER_NAME"] ?? "aegis-worker-1").trim() || "aegis-worker-1";
+
+  const rawConcurrency = env["WORKER_MAX_CONCURRENCY"];
+  const parsedConcurrency = rawConcurrency ? parseInt(rawConcurrency, 10) : 1;
+  const maxConcurrency =
+    Number.isNaN(parsedConcurrency) || parsedConcurrency < 1 ? 1 : parsedConcurrency;
+
+  const rawTaskTypes = env["WORKER_TASK_TYPES"];
+  const taskTypes =
+    rawTaskTypes && rawTaskTypes.trim().length > 0
+      ? rawTaskTypes
+          .split(",")
+          .map((t) => t.trim())
+          .filter((t) => t.length > 0)
+      : ["*"];
+
+  const rawTools = env["WORKER_TOOLS"];
+  const tools =
+    rawTools && rawTools.trim().length > 0
+      ? rawTools
+          .split(",")
+          .map((t) => t.trim())
+          .filter((t) => t.length > 0)
+      : [];
+
+  const rawTimeout = env["WORKER_SHUTDOWN_TIMEOUT_MS"];
+  const parsedTimeout = rawTimeout ? parseInt(rawTimeout, 10) : 10000;
+  const shutdownTimeoutMs =
+    Number.isNaN(parsedTimeout) || parsedTimeout < 100 || parsedTimeout > 60000
+      ? 10000
+      : parsedTimeout;
+
+  return {
+    workerId: workerIdVal,
+    workerName,
+    maxConcurrency,
+    taskTypes: taskTypes.length > 0 ? taskTypes : ["*"],
+    tools,
+    shutdownTimeoutMs,
   };
 }
 

@@ -16,6 +16,7 @@
   "scripts": {
     "build": "tsc --build",
     "clean": "rm -rf dist *.tsbuildinfo",
+    "test": "vitest run",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
