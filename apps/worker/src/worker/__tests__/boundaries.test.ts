@@ -31,7 +31,7 @@ describe("Worker Architectural Boundary Isolation (Phase 11A — Commit 5)", () 
     expect(allDeps).not.toContain("@prisma/client");
     expect(allDeps).not.toContain("prisma");
     expect(allDeps).not.toContain("ioredis");
-    expect(allDeps).not.toContain("kafkajs");
+    expect(allDeps).toContain("kafkajs");
   });
 
   it("apps/worker source code never imports forbidden platform layers", () => {

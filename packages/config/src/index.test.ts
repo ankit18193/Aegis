@@ -259,6 +259,9 @@ describe("@aegis/config", () => {
       expect(config.taskTypes).toEqual(["*"]);
       expect(config.tools).toEqual([]);
       expect(config.shutdownTimeoutMs).toBe(10000);
+      expect(config.kafkaBrokers).toEqual(["localhost:9092"]);
+      expect(config.taskAssignmentTopic).toBe("aegis.tasks.assign");
+      expect(config.workerConsumerGroupId).toBe("aegis-workers");
     });
 
     it("parses custom worker configuration and trims strings", () => {
@@ -268,6 +271,9 @@ describe("@aegis/config", () => {
       process.env["WORKER_TASK_TYPES"] = "analysis, transform , summary ";
       process.env["WORKER_TOOLS"] = "calculator, web_search , echo ";
       process.env["WORKER_SHUTDOWN_TIMEOUT_MS"] = "15000";
+      process.env["KAFKA_BROKERS"] = "broker1:9092, broker2:9092";
+      process.env["AEGIS_TASK_ASSIGNMENT_TOPIC"] = "custom.tasks.assign";
+      process.env["AEGIS_WORKER_CONSUMER_GROUP_ID"] = "custom-worker-group";
 
       const config = loadWorkerConfig();
       expect(config.workerId).toBe("worker-custom-99");
@@ -276,6 +282,9 @@ describe("@aegis/config", () => {
       expect(config.taskTypes).toEqual(["analysis", "transform", "summary"]);
       expect(config.tools).toEqual(["calculator", "web_search", "echo"]);
       expect(config.shutdownTimeoutMs).toBe(15000);
+      expect(config.kafkaBrokers).toEqual(["broker1:9092", "broker2:9092"]);
+      expect(config.taskAssignmentTopic).toBe("custom.tasks.assign");
+      expect(config.workerConsumerGroupId).toBe("custom-worker-group");
     });
 
     it("falls back to defaults for invalid numeric values or bounds", () => {

@@ -9,12 +9,15 @@ import type { Logger } from "@aegis/logger";
 import type { Result } from "@aegis/types";
 import { err, ok } from "@aegis/types";
 
+import type { WorkerTaskConsumer } from "../kafka/taskConsumer.js";
+
 import { createWorkerIdentity } from "./identity.js";
 import { WorkerLifecycleManager } from "./state.js";
 
 export interface WorkerRuntimeOptions {
   readonly identity?: WorkerIdentity | undefined;
   readonly logger?: Logger | undefined;
+  readonly consumer?: WorkerTaskConsumer | undefined;
   readonly onStart?: (() => Promise<void> | void) | undefined;
   readonly onStop?: (() => Promise<void> | void) | undefined;
 }
@@ -28,6 +31,7 @@ export class WorkerRuntime implements IWorkerRuntime {
   private readonly lifecycle: WorkerLifecycleManager;
   private readonly identity: WorkerIdentity;
   private readonly logger?: Logger | undefined;
+  private readonly consumer?: WorkerTaskConsumer | undefined;
   private readonly onStart?: (() => Promise<void> | void) | undefined;
   private readonly onStop?: (() => Promise<void> | void) | undefined;
   private stopPromise?: Promise<Result<void, WorkerErrorContract>> | undefined;
@@ -36,8 +40,16 @@ export class WorkerRuntime implements IWorkerRuntime {
     this.lifecycle = new WorkerLifecycleManager("starting");
     this.identity = options.identity ?? createWorkerIdentity();
     this.logger = options.logger;
+    this.consumer = options.consumer;
     this.onStart = options.onStart;
     this.onStop = options.onStop;
+  }
+
+  /**
+   * Returns the attached task consumer if configured.
+   */
+  public getConsumer(): WorkerTaskConsumer | undefined {
+    return this.consumer;
   }
 
   /**
@@ -86,6 +98,13 @@ export class WorkerRuntime implements IWorkerRuntime {
     }
 
     try {
+      if (this.consumer) {
+        const consumerRes = await this.consumer.start();
+        if (!consumerRes.ok) {
+          throw new Error(consumerRes.error.message);
+        }
+      }
+
       if (this.onStart) {
         await this.onStart();
       }
@@ -170,6 +189,10 @@ export class WorkerRuntime implements IWorkerRuntime {
     try {
       if (this.onStop) {
         await this.onStop();
+      }
+
+      if (this.consumer) {
+        await this.consumer.stop();
       }
 
       const stopRes = this.lifecycle.transitionTo("stopped");

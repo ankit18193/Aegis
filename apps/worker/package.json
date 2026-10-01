@@ -19,7 +19,8 @@
     "@aegis/contracts": "workspace:*",
     "@aegis/foundation": "workspace:*",
     "@aegis/logger": "workspace:*",
-    "@aegis/types": "workspace:*"
+    "@aegis/types": "workspace:*",
+    "kafkajs": "^2.2.4"
   },
   "devDependencies": {
     "tsx": "^4.0.0",

@@ -258,12 +258,17 @@ export interface WorkerConfig {
   readonly taskTypes: readonly string[];
   readonly tools: readonly string[];
   readonly shutdownTimeoutMs: number;
+  // Kafka task assignment configuration (Phase 11B)
+  readonly kafkaBrokers: readonly string[];
+  readonly taskAssignmentTopic: string;
+  readonly workerConsumerGroupId: string;
 }
 
 /**
  * Reads worker configuration from the environment.
  * Maps WORKER_ID, WORKER_NAME, WORKER_MAX_CONCURRENCY, WORKER_TASK_TYPES,
- * WORKER_TOOLS, and WORKER_SHUTDOWN_TIMEOUT_MS.
+ * WORKER_TOOLS, WORKER_SHUTDOWN_TIMEOUT_MS, KAFKA_BROKERS,
+ * AEGIS_TASK_ASSIGNMENT_TOPIC, and AEGIS_WORKER_CONSUMER_GROUP_ID.
  */
 export function loadWorkerConfig(env: NodeJS.ProcessEnv = process.env): WorkerConfig {
   const rawId = env["WORKER_ID"];
@@ -300,6 +305,23 @@ export function loadWorkerConfig(env: NodeJS.ProcessEnv = process.env): WorkerCo
       ? 10000
       : parsedTimeout;
 
+  const rawBrokers = env["KAFKA_BROKERS"];
+  const kafkaBrokers =
+    rawBrokers && rawBrokers.trim().length > 0
+      ? rawBrokers
+          .split(",")
+          .map((b) => b.trim())
+          .filter((b) => b.length > 0)
+      : ["localhost:9092"];
+
+  const taskAssignmentTopic =
+    (env["AEGIS_TASK_ASSIGNMENT_TOPIC"] ?? env["KAFKA_TASK_ASSIGNMENT_TOPIC"] ?? "aegis.tasks.assign").trim() ||
+    "aegis.tasks.assign";
+
+  const workerConsumerGroupId =
+    (env["AEGIS_WORKER_CONSUMER_GROUP_ID"] ?? env["WORKER_CONSUMER_GROUP_ID"] ?? "aegis-workers").trim() ||
+    "aegis-workers";
+
   return {
     workerId: workerIdVal,
     workerName,
@@ -307,6 +329,9 @@ export function loadWorkerConfig(env: NodeJS.ProcessEnv = process.env): WorkerCo
     taskTypes: taskTypes.length > 0 ? taskTypes : ["*"],
     tools,
     shutdownTimeoutMs,
+    kafkaBrokers: kafkaBrokers.length > 0 ? kafkaBrokers : ["localhost:9092"],
+    taskAssignmentTopic,
+    workerConsumerGroupId,
   };
 }
 

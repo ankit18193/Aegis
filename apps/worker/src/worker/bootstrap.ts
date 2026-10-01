@@ -1,12 +1,15 @@
 import type { WorkerConfig } from "@aegis/config";
 import type { Logger } from "@aegis/logger";
 
+import type { WorkerTaskConsumer } from "../kafka/taskConsumer.js";
+
 import { createWorkerIdentity } from "./identity.js";
 import { WorkerRuntime } from "./runtime.js";
 
 export interface CreateWorkerOptions {
   readonly config: WorkerConfig;
   readonly logger?: Logger | undefined;
+  readonly consumer?: WorkerTaskConsumer | undefined;
   readonly onStart?: (() => Promise<void> | void) | undefined;
   readonly onStop?: (() => Promise<void> | void) | undefined;
 }
@@ -28,6 +31,7 @@ export function createWorkerFromConfig(options: CreateWorkerOptions): WorkerRunt
   return new WorkerRuntime({
     identity,
     logger: options.logger,
+    consumer: options.consumer,
     onStart: options.onStart,
     onStop: options.onStop,
   });

@@ -339,6 +339,9 @@ importers:
       '@aegis/types':
         specifier: workspace:*
         version: link:../../packages/types
+      kafkajs:
+        specifier: ^2.2.4
+        version: 2.2.4
     devDependencies:
       tsx:
         specifier: ^4.0.0

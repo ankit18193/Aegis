@@ -1,6 +1,7 @@
 import type { Logger } from "@aegis/logger";
 import { describe, expect, it, vi } from "vitest";
 
+import type { WorkerTaskConsumer } from "../../kafka/taskConsumer.js";
 import { createWorkerIdentity } from "../identity.js";
 import { WorkerRuntime } from "../runtime.js";
 
@@ -165,6 +166,27 @@ describe("WorkerRuntime (Phase 11A — Commit 2)", () => {
     expect(res3.ok).toBe(true);
     expect(stopHookCallCount).toBe(1);
     expect(runtime.getState()).toBe("stopped");
+  });
+
+  it("coordinates attached WorkerTaskConsumer lifecycle during start and stop (Phase 11B)", async () => {
+    const mockConsumer = {
+      start: vi.fn().mockResolvedValue({ ok: true, value: undefined }),
+      stop: vi.fn().mockResolvedValue({ ok: true, value: undefined }),
+    };
+
+    const runtime = new WorkerRuntime({
+      consumer: mockConsumer as unknown as WorkerTaskConsumer,
+    });
+
+    expect(runtime.getConsumer()).toBe(mockConsumer);
+
+    const startRes = await runtime.start();
+    expect(startRes.ok).toBe(true);
+    expect(mockConsumer.start).toHaveBeenCalledTimes(1);
+
+    const stopRes = await runtime.stop();
+    expect(stopRes.ok).toBe(true);
+    expect(mockConsumer.stop).toHaveBeenCalledTimes(1);
   });
 });
 
