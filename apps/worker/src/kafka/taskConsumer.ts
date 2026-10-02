@@ -1,5 +1,6 @@
 import type {
   AssignmentErrorContract,
+  ITopicProvisioner,
 } from "@aegis/contracts";
 import {
   createAssignmentError,
@@ -22,6 +23,7 @@ export interface WorkerTaskConsumerOptions {
   readonly logger?: Logger | undefined;
   readonly fromBeginning?: boolean | undefined;
   readonly drainTimeoutMs?: number | undefined;
+  readonly topicProvisioner?: ITopicProvisioner | undefined;
 }
 
 /**
@@ -47,6 +49,8 @@ export class WorkerTaskConsumer {
   private readonly fromBeginning: boolean;
   private readonly drainTimeoutMs: number;
 
+  private readonly topicProvisioner?: ITopicProvisioner | undefined;
+
   private _isRunning = false;
   private _isStarting = false;
   private _isStopping = false;
@@ -60,6 +64,7 @@ export class WorkerTaskConsumer {
     this.logger = options.logger;
     this.fromBeginning = options.fromBeginning ?? false;
     this.drainTimeoutMs = options.drainTimeoutMs ?? 5000;
+    this.topicProvisioner = options.topicProvisioner;
 
     this.consumer.on(this.consumer.events.REBALANCING, () => {
       this.logger?.info("Worker Kafka consumer rebalance initiated", {
@@ -104,6 +109,10 @@ export class WorkerTaskConsumer {
     this._isStarting = true;
 
     try {
+      if (this.topicProvisioner) {
+        await this.topicProvisioner.ensureTopic(this.topic);
+      }
+
       await this.consumer.connect();
       await this.consumer.subscribe({
         topic: this.topic,
