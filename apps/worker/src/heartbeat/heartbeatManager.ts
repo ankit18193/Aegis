@@ -42,6 +42,7 @@ export class WorkerHeartbeatManager {
   private timer: NodeJS.Timeout | null = null;
   private _isRunning = false;
   private _isStopping = false;
+  private isPublishing = false;
   private _lastEmittedAt?: string | undefined;
   private _emissionCount = 0;
   private _lastObservableState?: WorkerObservableState | undefined;
@@ -159,58 +160,70 @@ export class WorkerHeartbeatManager {
    * Catches all publishing exceptions to protect worker runtime stability (LOCK 7).
    */
   public async emitHeartbeat(): Promise<Result<WorkerHeartbeatEnvelope, WorkerHeartbeatError> | null> {
-    const rawState = this.getState();
-    const activeTasks = this.getActiveTaskCount();
-    const maxTasks = this.getMaxConcurrentTasks();
-
-    // Compute observable state: if ready and running active tasks, advertise "busy"
-    let observableState: WorkerObservableState = rawState;
-    if (rawState === "ready" && activeTasks > 0) {
-      observableState = "busy";
-    }
-
-    const payload: WorkerHeartbeat = {
-      heartbeatId: heartbeatId(`hb-${randomUUID()}`),
-      workerId: this.workerId,
-      occurredAt: new Date().toISOString(),
-      lifecycleState: observableState,
-      activeTaskCount: activeTasks,
-      maxConcurrentTasks: maxTasks,
-      capabilities: this.capabilities,
-    };
-
-    try {
-      const publishResult = await this.publisher.publish(payload);
-      if (!publishResult.ok) {
-        this.logger?.warn("Worker heartbeat publish returned failure; continuing worker execution", {
-          workerId: this.workerId,
-          heartbeatId: payload.heartbeatId,
-          error: publishResult.error.message,
-        });
-        return publishResult;
-      }
-
-      this._lastEmittedAt = payload.occurredAt;
-      this._emissionCount++;
-      this._lastObservableState = observableState;
-
-      this.logger?.debug("Worker heartbeat published successfully", {
+    if (this.isPublishing) {
+      this.logger?.debug("Worker heartbeat publish already in progress; skipping pulse", {
         workerId: this.workerId,
-        heartbeatId: payload.heartbeatId,
-        lifecycleState: observableState,
-        activeTasks,
-        emissionCount: this._emissionCount,
-      });
-
-      return publishResult;
-    } catch (unhandledError) {
-      // LOCK 7: Fault-tolerant error containment
-      this.logger?.warn("Worker heartbeat publisher threw an unhandled error; continuing worker execution", {
-        workerId: this.workerId,
-        heartbeatId: payload.heartbeatId,
-        error: unhandledError instanceof Error ? unhandledError.message : String(unhandledError),
       });
       return null;
+    }
+
+    this.isPublishing = true;
+    try {
+      const rawState = this.getState();
+      const activeTasks = this.getActiveTaskCount();
+      const maxTasks = this.getMaxConcurrentTasks();
+
+      // Compute observable state: if ready and running active tasks, advertise "busy"
+      let observableState: WorkerObservableState = rawState;
+      if (rawState === "ready" && activeTasks > 0) {
+        observableState = "busy";
+      }
+
+      const payload: WorkerHeartbeat = {
+        heartbeatId: heartbeatId(`hb-${randomUUID()}`),
+        workerId: this.workerId,
+        occurredAt: new Date().toISOString(),
+        lifecycleState: observableState,
+        activeTaskCount: activeTasks,
+        maxConcurrentTasks: maxTasks,
+        capabilities: this.capabilities,
+      };
+
+      try {
+        const publishResult = await this.publisher.publish(payload);
+        if (!publishResult.ok) {
+          this.logger?.warn("Worker heartbeat publish returned failure; continuing worker execution", {
+            workerId: this.workerId,
+            heartbeatId: payload.heartbeatId,
+            error: publishResult.error.message,
+          });
+          return publishResult;
+        }
+
+        this._lastEmittedAt = payload.occurredAt;
+        this._emissionCount++;
+        this._lastObservableState = observableState;
+
+        this.logger?.debug("Worker heartbeat published successfully", {
+          workerId: this.workerId,
+          heartbeatId: payload.heartbeatId,
+          lifecycleState: observableState,
+          activeTasks,
+          emissionCount: this._emissionCount,
+        });
+
+        return publishResult;
+      } catch (unhandledError) {
+        // LOCK 7: Fault-tolerant error containment
+        this.logger?.warn("Worker heartbeat publisher threw an unhandled error; continuing worker execution", {
+          workerId: this.workerId,
+          heartbeatId: payload.heartbeatId,
+          error: unhandledError instanceof Error ? unhandledError.message : String(unhandledError),
+        });
+        return null;
+      }
+    } finally {
+      this.isPublishing = false;
     }
   }
 }

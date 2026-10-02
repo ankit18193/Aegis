@@ -45,6 +45,19 @@ export class InMemoryWorkerRegistry implements IWorkerRegistry {
     const presenceState: WorkerPresenceState = isStopped ? "OFFLINE" : "HEALTHY";
 
     if (existing) {
+      const existingHeartbeatTime = new Date(existing.lastHeartbeatAt).getTime();
+      const incomingHeartbeatTime = new Date(heartbeat.occurredAt).getTime();
+
+      // Guard against out-of-order telemetry: ignore heartbeats older than latest processed
+      if (incomingHeartbeatTime < existingHeartbeatTime) {
+        this.logger?.warn("Discarding out-of-order worker heartbeat", {
+          workerId: heartbeat.workerId,
+          incomingOccurredAt: heartbeat.occurredAt,
+          currentLastHeartbeatAt: existing.lastHeartbeatAt,
+        });
+        return;
+      }
+
       const updated: WorkerDescriptor = {
         ...existing,
         lifecycleState: heartbeat.lifecycleState,

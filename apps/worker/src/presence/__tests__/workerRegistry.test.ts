@@ -98,6 +98,27 @@ describe("InMemoryWorkerRegistry", () => {
     expect(registry.get(worker1)?.presenceState).toBe("HEALTHY");
   });
 
+  it("discards out-of-order heartbeats with older timestamps", () => {
+    const registry = new InMemoryWorkerRegistry();
+    registry.register(baseDescriptor); // lastHeartbeatAt: 2026-10-02T10:00:00.000Z
+
+    // Incoming heartbeat with older timestamp
+    registry.updateHeartbeat({
+      heartbeatId: heartbeatId("hb-w1-old"),
+      workerId: worker1,
+      occurredAt: "2026-10-02T09:59:00.000Z", // 1 minute in the past
+      lifecycleState: "failed",
+      activeTaskCount: 99,
+      maxConcurrentTasks: 5,
+      capabilities: { taskTypes: ["bash"], tools: ["terminal"], maxConcurrency: 5 },
+    });
+
+    const worker = registry.get(worker1);
+    expect(worker?.lifecycleState).toBe("ready"); // not overwritten by stale pulse
+    expect(worker?.activeTaskCount).toBe(0);
+    expect(worker?.lastHeartbeatAt).toBe("2026-10-02T10:00:00.000Z");
+  });
+
   it("marks presence OFFLINE when worker emits stopped lifecycle state", () => {
     const registry = new InMemoryWorkerRegistry();
     registry.register(baseDescriptor);
