@@ -121,6 +121,10 @@ describe("Distributed Task Assignment End-to-End Integration (Phase 11B — Comm
         workerConsumerGroupId: "aegis-workers",
         taskResultTopic: "aegis.tasks.results",
         maxConcurrentTasks: 1,
+        workerHeartbeatIntervalMs: 10000,
+        workerHeartbeatTimeoutMs: 30000,
+        workerHeartbeatTopic: "aegis.workers.heartbeat",
+        workerPresenceConsumerGroup: "aegis-worker-presence",
       },
       consumer: taskConsumer,
     });

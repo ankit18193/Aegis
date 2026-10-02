@@ -253,6 +253,10 @@ describe("@aegis/config", () => {
       delete process.env["WORKER_SHUTDOWN_TIMEOUT_MS"];
       delete process.env["AEGIS_TASK_RESULT_TOPIC"];
       delete process.env["AEGIS_WORKER_MAX_CONCURRENT_TASKS"];
+      delete process.env["WORKER_HEARTBEAT_INTERVAL_MS"];
+      delete process.env["WORKER_HEARTBEAT_TIMEOUT_MS"];
+      delete process.env["AEGIS_WORKER_HEARTBEAT_TOPIC"];
+      delete process.env["AEGIS_WORKER_PRESENCE_CONSUMER_GROUP"];
 
       const config = loadWorkerConfig();
       expect(config.workerId).toBeUndefined();
@@ -266,6 +270,10 @@ describe("@aegis/config", () => {
       expect(config.taskAssignmentTopic).toBe("aegis.tasks.assign");
       expect(config.taskResultTopic).toBe("aegis.tasks.results");
       expect(config.workerConsumerGroupId).toBe("aegis-workers");
+      expect(config.workerHeartbeatIntervalMs).toBe(10000);
+      expect(config.workerHeartbeatTimeoutMs).toBe(30000);
+      expect(config.workerHeartbeatTopic).toBe("aegis.workers.heartbeat");
+      expect(config.workerPresenceConsumerGroup).toBe("aegis-worker-presence");
     });
 
     it("parses custom worker configuration and trims strings", () => {
@@ -280,6 +288,10 @@ describe("@aegis/config", () => {
       process.env["AEGIS_WORKER_CONSUMER_GROUP_ID"] = "custom-worker-group";
       process.env["AEGIS_TASK_RESULT_TOPIC"] = "custom.tasks.results";
       process.env["AEGIS_WORKER_MAX_CONCURRENT_TASKS"] = "4";
+      process.env["WORKER_HEARTBEAT_INTERVAL_MS"] = "5000";
+      process.env["WORKER_HEARTBEAT_TIMEOUT_MS"] = "20000";
+      process.env["AEGIS_WORKER_HEARTBEAT_TOPIC"] = "custom.workers.heartbeat";
+      process.env["AEGIS_WORKER_PRESENCE_CONSUMER_GROUP"] = "custom-presence-group";
 
       const config = loadWorkerConfig();
       expect(config.workerId).toBe("worker-custom-99");
@@ -293,17 +305,25 @@ describe("@aegis/config", () => {
       expect(config.taskAssignmentTopic).toBe("custom.tasks.assign");
       expect(config.taskResultTopic).toBe("custom.tasks.results");
       expect(config.workerConsumerGroupId).toBe("custom-worker-group");
+      expect(config.workerHeartbeatIntervalMs).toBe(5000);
+      expect(config.workerHeartbeatTimeoutMs).toBe(20000);
+      expect(config.workerHeartbeatTopic).toBe("custom.workers.heartbeat");
+      expect(config.workerPresenceConsumerGroup).toBe("custom-presence-group");
     });
 
     it("falls back to defaults for invalid numeric values or bounds", () => {
       process.env["WORKER_MAX_CONCURRENCY"] = "invalid";
       process.env["WORKER_SHUTDOWN_TIMEOUT_MS"] = "-50";
       process.env["AEGIS_WORKER_MAX_CONCURRENT_TASKS"] = "invalid";
+      process.env["WORKER_HEARTBEAT_INTERVAL_MS"] = "invalid";
+      process.env["WORKER_HEARTBEAT_TIMEOUT_MS"] = "-100";
 
       const config = loadWorkerConfig();
       expect(config.maxConcurrency).toBe(1);
       expect(config.maxConcurrentTasks).toBe(1);
       expect(config.shutdownTimeoutMs).toBe(10000);
+      expect(config.workerHeartbeatIntervalMs).toBe(10000);
+      expect(config.workerHeartbeatTimeoutMs).toBe(30000);
 
       process.env["WORKER_MAX_CONCURRENCY"] = "-3";
       process.env["WORKER_SHUTDOWN_TIMEOUT_MS"] = "999999"; // exceeds 60000 bound
@@ -315,6 +335,15 @@ describe("@aegis/config", () => {
       expect(config2.shutdownTimeoutMs).toBe(10000);
     });
 
+    it("enforces timeout strictly greater than interval invariant", () => {
+      process.env["WORKER_HEARTBEAT_INTERVAL_MS"] = "15000";
+      process.env["WORKER_HEARTBEAT_TIMEOUT_MS"] = "10000"; // timeout <= interval!
+
+      const config = loadWorkerConfig();
+      expect(config.workerHeartbeatIntervalMs).toBe(15000);
+      expect(config.workerHeartbeatTimeoutMs).toBe(45000);
+    });
+
     it("accepts custom env parameter directly", () => {
       const customEnv: NodeJS.ProcessEnv = {
         WORKER_ID: "worker-direct-1",
@@ -322,6 +351,10 @@ describe("@aegis/config", () => {
         WORKER_MAX_CONCURRENCY: "4",
         AEGIS_TASK_RESULT_TOPIC: "direct.tasks.results",
         AEGIS_WORKER_MAX_CONCURRENT_TASKS: "2",
+        WORKER_HEARTBEAT_INTERVAL_MS: "8000",
+        WORKER_HEARTBEAT_TIMEOUT_MS: "24000",
+        AEGIS_WORKER_HEARTBEAT_TOPIC: "direct.workers.heartbeat",
+        AEGIS_WORKER_PRESENCE_CONSUMER_GROUP: "direct-presence-group",
       };
 
       const config = loadWorkerConfig(customEnv);
@@ -330,6 +363,10 @@ describe("@aegis/config", () => {
       expect(config.maxConcurrency).toBe(4);
       expect(config.maxConcurrentTasks).toBe(2);
       expect(config.taskResultTopic).toBe("direct.tasks.results");
+      expect(config.workerHeartbeatIntervalMs).toBe(8000);
+      expect(config.workerHeartbeatTimeoutMs).toBe(24000);
+      expect(config.workerHeartbeatTopic).toBe("direct.workers.heartbeat");
+      expect(config.workerPresenceConsumerGroup).toBe("direct-presence-group");
     });
   });
 });

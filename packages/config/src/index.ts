@@ -265,6 +265,11 @@ export interface WorkerConfig {
   // Worker execution & result reporting configuration (Phase 11C)
   readonly taskResultTopic: string;
   readonly maxConcurrentTasks: number;
+  // Worker heartbeat & coordination configuration (Phase 11D)
+  readonly workerHeartbeatIntervalMs: number;
+  readonly workerHeartbeatTimeoutMs: number;
+  readonly workerHeartbeatTopic: string;
+  readonly workerPresenceConsumerGroup: string;
 }
 
 /**
@@ -272,7 +277,9 @@ export interface WorkerConfig {
  * Maps WORKER_ID, WORKER_NAME, WORKER_MAX_CONCURRENCY, WORKER_TASK_TYPES,
  * WORKER_TOOLS, WORKER_SHUTDOWN_TIMEOUT_MS, KAFKA_BROKERS,
  * AEGIS_TASK_ASSIGNMENT_TOPIC, AEGIS_WORKER_CONSUMER_GROUP_ID,
- * AEGIS_TASK_RESULT_TOPIC, and AEGIS_WORKER_MAX_CONCURRENT_TASKS.
+ * AEGIS_TASK_RESULT_TOPIC, AEGIS_WORKER_MAX_CONCURRENT_TASKS,
+ * WORKER_HEARTBEAT_INTERVAL_MS, WORKER_HEARTBEAT_TIMEOUT_MS,
+ * AEGIS_WORKER_HEARTBEAT_TOPIC, and AEGIS_WORKER_PRESENCE_CONSUMER_GROUP.
  */
 export function loadWorkerConfig(env: NodeJS.ProcessEnv = process.env): WorkerConfig {
   const rawId = env["WORKER_ID"];
@@ -288,18 +295,18 @@ export function loadWorkerConfig(env: NodeJS.ProcessEnv = process.env): WorkerCo
   const taskTypes =
     rawTaskTypes && rawTaskTypes.trim().length > 0
       ? rawTaskTypes
-          .split(",")
-          .map((t) => t.trim())
-          .filter((t) => t.length > 0)
+      .split(",")
+      .map((t) => t.trim())
+      .filter((t) => t.length > 0)
       : ["*"];
 
   const rawTools = env["WORKER_TOOLS"];
   const tools =
     rawTools && rawTools.trim().length > 0
       ? rawTools
-          .split(",")
-          .map((t) => t.trim())
-          .filter((t) => t.length > 0)
+      .split(",")
+      .map((t) => t.trim())
+      .filter((t) => t.length > 0)
       : [];
 
   const rawTimeout = env["WORKER_SHUTDOWN_TIMEOUT_MS"];
@@ -313,9 +320,9 @@ export function loadWorkerConfig(env: NodeJS.ProcessEnv = process.env): WorkerCo
   const kafkaBrokers =
     rawBrokers && rawBrokers.trim().length > 0
       ? rawBrokers
-          .split(",")
-          .map((b) => b.trim())
-          .filter((b) => b.length > 0)
+      .split(",")
+      .map((b) => b.trim())
+      .filter((b) => b.length > 0)
       : ["localhost:9092"];
 
   const taskAssignmentTopic =
@@ -339,6 +346,33 @@ export function loadWorkerConfig(env: NodeJS.ProcessEnv = process.env): WorkerCo
         ? maxConcurrency
         : 1;
 
+  const rawInterval = env["WORKER_HEARTBEAT_INTERVAL_MS"] ?? env["AEGIS_WORKER_HEARTBEAT_INTERVAL_MS"];
+  const parsedInterval = rawInterval ? parseInt(rawInterval, 10) : 10000;
+  const workerHeartbeatIntervalMs =
+    Number.isNaN(parsedInterval) || parsedInterval < 100 || parsedInterval > 300000
+      ? 10000
+      : parsedInterval;
+
+  const rawTimeoutHb = env["WORKER_HEARTBEAT_TIMEOUT_MS"] ?? env["AEGIS_WORKER_HEARTBEAT_TIMEOUT_MS"];
+  const parsedTimeoutHb = rawTimeoutHb ? parseInt(rawTimeoutHb, 10) : 30000;
+  let workerHeartbeatTimeoutMs =
+    Number.isNaN(parsedTimeoutHb) || parsedTimeoutHb < 500 || parsedTimeoutHb > 600000
+      ? 30000
+      : parsedTimeoutHb;
+
+  // Invariant: timeout must strictly exceed interval
+  if (workerHeartbeatTimeoutMs <= workerHeartbeatIntervalMs) {
+    workerHeartbeatTimeoutMs = workerHeartbeatIntervalMs * 3;
+  }
+
+  const workerHeartbeatTopic =
+    (env["AEGIS_WORKER_HEARTBEAT_TOPIC"] ?? env["KAFKA_WORKER_HEARTBEAT_TOPIC"] ?? "aegis.workers.heartbeat").trim() ||
+    "aegis.workers.heartbeat";
+
+  const workerPresenceConsumerGroup =
+    (env["AEGIS_WORKER_PRESENCE_CONSUMER_GROUP"] ?? env["WORKER_PRESENCE_CONSUMER_GROUP"] ?? "aegis-worker-presence").trim() ||
+    "aegis-worker-presence";
+
   return {
     workerId: workerIdVal,
     workerName,
@@ -351,6 +385,10 @@ export function loadWorkerConfig(env: NodeJS.ProcessEnv = process.env): WorkerCo
     workerConsumerGroupId,
     taskResultTopic,
     maxConcurrentTasks,
+    workerHeartbeatIntervalMs,
+    workerHeartbeatTimeoutMs,
+    workerHeartbeatTopic,
+    workerPresenceConsumerGroup,
   };
 }
 
