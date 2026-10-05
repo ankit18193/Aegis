@@ -1,13 +1,16 @@
 import type {
   EventSeverity,
   EventType,
+  LeaseError,
   Run,
   RunEvent,
   RunStatus,
   RunSummary,
+  Task,
+  TaskLease,
   TaskStateUpdate,
 } from "@aegis/contracts";
-import type { Result, RunId, TaskId } from "@aegis/types";
+import type { LeaseId, Result, RunId, TaskId, WorkerId } from "@aegis/types";
 
 import type { ConcurrencyConflictError, DomainError } from "../domain/errors.js";
 
@@ -52,4 +55,52 @@ export interface IRunRepository {
     update: TaskStateUpdate,
     expectedVersion: number,
   ): Promise<Result<{ readonly newVersion: number }, ConcurrencyConflictError | DomainError>>;
+
+  /**
+   * Acquires a lease for a running task guarded by expectedVersion.
+   */
+  acquireTaskLease(
+    taskId: TaskId,
+    workerId: WorkerId,
+    leaseDurationMs: number,
+    expectedVersion: number,
+  ): Promise<Result<TaskLease, LeaseError>>;
+
+  /**
+   * Renews an active lease for a running task guarded by expectedVersion and leaseId.
+   */
+  renewTaskLease(
+    taskId: TaskId,
+    leaseId: LeaseId,
+    workerId: WorkerId,
+    leaseDurationMs: number,
+    expectedVersion: number,
+  ): Promise<Result<TaskLease, LeaseError>>;
+
+  /**
+   * Explicitly releases an active lease guarded by expectedVersion and leaseId.
+   */
+  releaseTaskLease(
+    taskId: TaskId,
+    leaseId: LeaseId,
+    workerId: WorkerId,
+    expectedVersion: number,
+  ): Promise<Result<void, LeaseError>>;
+
+  /**
+   * Queries tasks with expired leases without mutating them (pure read-only).
+   */
+  getExpiredTaskLeases(cutoff: Date, limit?: number): Promise<Task[]>;
+
+  /**
+   * Atomically marks a task's lease as expired guarded by expectedVersion and lease_until < expiredAt.
+   * Returns true if successfully marked expired, or false if already mutated or version conflict.
+   * INVARIANT: Task remains in 'running' status; worker identity is preserved.
+   */
+  markTaskLeaseExpired(
+    taskId: TaskId,
+    expectedVersion: number,
+    expiredAt: Date,
+  ): Promise<boolean>;
 }
+

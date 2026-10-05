@@ -59,11 +59,15 @@ export const tasksTable = pgTable(
     output: text("output"),
     error: text("error"),
     dependencies: jsonb("dependencies").$type<string[]>(),
+    leaseId: text("lease_id"),
+    leaseUntil: timestamp("lease_until", { withTimezone: true, mode: "string" }),
+    leaseExpiredAt: timestamp("lease_expired_at", { withTimezone: true, mode: "string" }),
   },
   (table) => [
     index("tasks_run_id_idx").on(table.runId),
     index("tasks_run_id_status_idx").on(table.runId, table.status),
     index("tasks_worker_id_idx").on(table.workerId),
+    index("tasks_lease_until_idx").on(table.status, table.leaseUntil),
   ],
 );
 

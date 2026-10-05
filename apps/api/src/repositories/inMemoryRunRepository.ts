@@ -1,6 +1,12 @@
-import type { Run, RunEvent, RunSummary, Task, TaskStateUpdate } from "@aegis/contracts";
-import type { Result, RunId, TaskId } from "@aegis/types";
-import { err, ok } from "@aegis/types";
+import type { Run, RunEvent, RunSummary, Task, TaskLease, TaskStateUpdate } from "@aegis/contracts";
+import {
+  LeaseError,
+  LeaseExpiredError,
+  LeaseOwnershipConflictError,
+  StaleLeaseError,
+} from "@aegis/contracts";
+import type { LeaseId, Result, RunId, TaskId, WorkerId } from "@aegis/types";
+import { err, leaseId, ok } from "@aegis/types";
 
 import { ConcurrencyConflictError, type DomainError, TaskNotFoundError } from "../domain/errors.js";
 import { assertValidTaskTransition } from "../domain/lifecycle.js";
@@ -184,5 +190,284 @@ export class InMemoryRunRepository implements IRunRepository {
     }
 
     return Promise.resolve(err(new TaskNotFoundError(taskId)));
+  }
+
+  acquireTaskLease(
+    taskId: TaskId,
+    workerId: WorkerId,
+    leaseDurationMs: number,
+    expectedVersion: number,
+  ): Promise<Result<TaskLease, LeaseError>> {
+    for (const run of this.runs.values()) {
+      const task = run.tasks.find((t) => t.id === taskId);
+      if (task) {
+        if (task.version !== expectedVersion) {
+          return Promise.resolve(
+            err(
+              new LeaseError(
+                "CONCURRENCY_CONFLICT",
+                `Version conflict acquiring lease for task '${taskId}': expected ${String(expectedVersion)}, actual ${String(task.version)}`,
+                taskId,
+                workerId,
+              ),
+            ),
+          );
+        }
+
+        if (task.status !== "running") {
+          return Promise.resolve(
+            err(
+              new LeaseError(
+                "CONCURRENCY_CONFLICT",
+                `Task '${taskId}' is in status '${task.status}', must be 'running' to acquire lease`,
+                taskId,
+                workerId,
+              ),
+            ),
+          );
+        }
+
+        const now = new Date();
+        const nowIso = now.toISOString();
+
+        if (
+          task.leaseId &&
+          task.workerId &&
+          task.workerId !== workerId &&
+          task.leaseUntil &&
+          task.leaseUntil > nowIso &&
+          !task.leaseExpiredAt
+        ) {
+          return Promise.resolve(
+            err(new LeaseOwnershipConflictError(taskId, task.workerId, workerId)),
+          );
+        }
+
+        const newLeaseId = leaseId(`lease-${crypto.randomUUID()}`);
+        const leaseUntil = new Date(now.getTime() + leaseDurationMs).toISOString();
+        const newVersion = expectedVersion + 1;
+
+        task.leaseId = newLeaseId;
+        task.workerId = workerId;
+        task.worker = workerId;
+        task.leaseUntil = leaseUntil;
+        task.leaseExpiredAt = undefined;
+        task.version = newVersion;
+        run.updatedAt = nowIso;
+
+        return Promise.resolve(
+          ok({
+            leaseId: newLeaseId,
+            taskId,
+            workerId,
+            acquiredAt: nowIso,
+            leaseUntil,
+            version: newVersion,
+          }),
+        );
+      }
+    }
+
+    return Promise.resolve(
+      err(new LeaseError("TASK_NOT_FOUND", `Task '${taskId}' not found`, taskId, workerId)),
+    );
+  }
+
+  renewTaskLease(
+    taskId: TaskId,
+    leaseId: LeaseId,
+    workerId: WorkerId,
+    leaseDurationMs: number,
+    expectedVersion: number,
+  ): Promise<Result<TaskLease, LeaseError>> {
+    for (const run of this.runs.values()) {
+      const task = run.tasks.find((t) => t.id === taskId);
+      if (task) {
+        if (task.version !== expectedVersion) {
+          return Promise.resolve(
+            err(
+              new LeaseError(
+                "CONCURRENCY_CONFLICT",
+                `Version conflict renewing lease for task '${taskId}': expected ${String(expectedVersion)}, actual ${String(task.version)}`,
+                taskId,
+                workerId,
+                leaseId,
+              ),
+            ),
+          );
+        }
+
+        if (task.status !== "running") {
+          return Promise.resolve(
+            err(
+              new LeaseError(
+                "CONCURRENCY_CONFLICT",
+                `Task '${taskId}' is in status '${task.status}', must be 'running' to renew lease`,
+                taskId,
+                workerId,
+                leaseId,
+              ),
+            ),
+          );
+        }
+
+        if (!task.leaseId || task.leaseId !== leaseId) {
+          return Promise.resolve(
+            err(
+              new StaleLeaseError(
+                taskId,
+                leaseId,
+                task.leaseId ? (task.leaseId as unknown as LeaseId) : undefined,
+              ),
+            ),
+          );
+        }
+
+        if (task.workerId && task.workerId !== workerId) {
+          return Promise.resolve(
+            err(new LeaseOwnershipConflictError(taskId, task.workerId, workerId)),
+          );
+        }
+
+        const now = new Date();
+        const nowIso = now.toISOString();
+
+        if (task.leaseExpiredAt || (task.leaseUntil && task.leaseUntil < nowIso)) {
+          return Promise.resolve(err(new LeaseExpiredError(taskId, leaseId, workerId)));
+        }
+
+        const newLeaseUntil = new Date(now.getTime() + leaseDurationMs).toISOString();
+        const newVersion = expectedVersion + 1;
+
+        task.leaseUntil = newLeaseUntil;
+        task.version = newVersion;
+        run.updatedAt = nowIso;
+
+        return Promise.resolve(
+          ok({
+            leaseId,
+            taskId,
+            workerId,
+            acquiredAt: task.startedAt ?? nowIso,
+            leaseUntil: newLeaseUntil,
+            version: newVersion,
+          }),
+        );
+      }
+    }
+
+    return Promise.resolve(
+      err(new LeaseError("TASK_NOT_FOUND", `Task '${taskId}' not found`, taskId, workerId, leaseId)),
+    );
+  }
+
+  releaseTaskLease(
+    taskId: TaskId,
+    leaseId: LeaseId,
+    workerId: WorkerId,
+    expectedVersion: number,
+  ): Promise<Result<void, LeaseError>> {
+    for (const run of this.runs.values()) {
+      const task = run.tasks.find((t) => t.id === taskId);
+      if (task) {
+        if (task.version !== expectedVersion) {
+          return Promise.resolve(
+            err(
+              new LeaseError(
+                "CONCURRENCY_CONFLICT",
+                `Version conflict releasing lease for task '${taskId}': expected ${String(expectedVersion)}, actual ${String(task.version)}`,
+                taskId,
+                workerId,
+                leaseId,
+              ),
+            ),
+          );
+        }
+
+        if (task.leaseId && task.leaseId !== leaseId) {
+          return Promise.resolve(
+            err(
+              new StaleLeaseError(
+                taskId,
+                leaseId,
+                task.leaseId ? (task.leaseId as unknown as LeaseId) : undefined,
+              ),
+            ),
+          );
+        }
+
+        if (task.workerId && task.workerId !== workerId) {
+          return Promise.resolve(
+            err(new LeaseOwnershipConflictError(taskId, task.workerId, workerId)),
+          );
+        }
+
+        const newVersion = expectedVersion + 1;
+        task.leaseId = undefined;
+        task.leaseUntil = undefined;
+        task.version = newVersion;
+        run.updatedAt = new Date().toISOString();
+
+        return Promise.resolve(ok(undefined));
+      }
+    }
+
+    return Promise.resolve(
+      err(new LeaseError("TASK_NOT_FOUND", `Task '${taskId}' not found`, taskId, workerId, leaseId)),
+    );
+  }
+
+  getExpiredTaskLeases(cutoff: Date, limit = 50): Promise<Task[]> {
+    const cutoffIso = cutoff.toISOString();
+    const candidates: Task[] = [];
+
+    for (const run of this.runs.values()) {
+      for (const task of run.tasks) {
+        if (
+          task.status === "running" &&
+          task.leaseUntil &&
+          task.leaseUntil < cutoffIso &&
+          !task.leaseExpiredAt
+        ) {
+          candidates.push(structuredClone(task));
+        }
+      }
+    }
+
+    candidates.sort((a, b) => (a.leaseUntil ?? "").localeCompare(b.leaseUntil ?? ""));
+    return Promise.resolve(candidates.slice(0, limit));
+  }
+
+  markTaskLeaseExpired(
+    taskId: TaskId,
+    expectedVersion: number,
+    expiredAt: Date,
+  ): Promise<boolean> {
+    const expiredAtIso = expiredAt.toISOString();
+
+    for (const run of this.runs.values()) {
+      const taskIndex = run.tasks.findIndex((t) => t.id === taskId);
+      if (taskIndex !== -1) {
+        const task = run.tasks[taskIndex];
+        if (!task) continue;
+
+        if (
+          task.version === expectedVersion &&
+          task.status === "running" &&
+          task.leaseUntil &&
+          task.leaseUntil < expiredAtIso &&
+          !task.leaseExpiredAt
+        ) {
+          task.leaseExpiredAt = expiredAtIso;
+          task.version = expectedVersion + 1;
+          run.updatedAt = expiredAtIso;
+          return Promise.resolve(true);
+        }
+
+        return Promise.resolve(false);
+      }
+    }
+
+    return Promise.resolve(false);
   }
 }

@@ -3,8 +3,15 @@
  * Encapsulates lifecycle transitions, terminal immutability, and state snapshotting.
  */
 
-import type { Result, TaskId, WorkerId } from "@aegis/types";
-import { ok } from "@aegis/types";
+import type { TaskLease } from "@aegis/contracts";
+import {
+  LeaseError,
+  LeaseExpiredError,
+  LeaseOwnershipConflictError,
+  StaleLeaseError,
+} from "@aegis/contracts";
+import type { LeaseId, Result, TaskId, WorkerId } from "@aegis/types";
+import { err, leaseId, ok } from "@aegis/types";
 
 import type { DomainError } from "./errors.js";
 import {
@@ -28,6 +35,9 @@ export interface TaskSnapshot {
   readonly output?: string | undefined;
   readonly error?: string | undefined;
   readonly dependencies?: readonly TaskId[] | undefined;
+  readonly leaseId?: LeaseId | undefined;
+  readonly leaseUntil?: string | undefined;
+  readonly leaseExpiredAt?: string | undefined;
 }
 
 export interface CreateTaskProps {
@@ -48,6 +58,9 @@ export class TaskEntity {
   private _input?: Record<string, unknown> | string | undefined;
   private _output?: string | undefined;
   private _error?: string | undefined;
+  private _leaseId?: LeaseId | undefined;
+  private _leaseUntil?: string | undefined;
+  private _leaseExpiredAt?: string | undefined;
 
   constructor(
     readonly id: TaskId,
@@ -63,6 +76,9 @@ export class TaskEntity {
     error?: string,
     input?: Record<string, unknown> | string,
     version = 1,
+    leaseId?: LeaseId,
+    leaseUntil?: string,
+    leaseExpiredAt?: string,
   ) {
     this._status = status;
     this._attemptCount = attemptCount;
@@ -73,6 +89,9 @@ export class TaskEntity {
     this._output = output;
     this._error = error;
     this._input = input;
+    this._leaseId = leaseId;
+    this._leaseUntil = leaseUntil;
+    this._leaseExpiredAt = leaseExpiredAt;
   }
 
   static create(props: CreateTaskProps): TaskEntity {
@@ -108,6 +127,9 @@ export class TaskEntity {
       snapshot.error,
       snapshot.input,
       snapshot.version ?? 1,
+      snapshot.leaseId,
+      snapshot.leaseUntil,
+      snapshot.leaseExpiredAt,
     );
   }
 
@@ -137,6 +159,18 @@ export class TaskEntity {
 
   get attemptCount(): number {
     return this._attemptCount;
+  }
+
+  get leaseId(): LeaseId | undefined {
+    return this._leaseId;
+  }
+
+  get leaseUntil(): string | undefined {
+    return this._leaseUntil;
+  }
+
+  get leaseExpiredAt(): string | undefined {
+    return this._leaseExpiredAt;
   }
 
   get input(): Record<string, unknown> | string | undefined {
@@ -243,6 +277,148 @@ export class TaskEntity {
     return ok(undefined);
   }
 
+  /**
+   * Acquires an execution lease for this task.
+   */
+  acquireLease(
+    workerId: WorkerId,
+    leaseDurationMs: number,
+    now: Date = new Date(),
+  ): Result<TaskLease, LeaseError> {
+    if (this._status !== "running") {
+      return err(
+        new LeaseError(
+          "CONCURRENCY_CONFLICT",
+          `Cannot acquire lease for task '${this.id}' in status '${this._status}'. Task must be running.`,
+          this.id,
+          workerId,
+        ),
+      );
+    }
+
+    const nowIso = now.toISOString();
+    if (
+      this._leaseId &&
+      this._worker &&
+      this._worker !== workerId &&
+      this._leaseUntil &&
+      this._leaseUntil > nowIso &&
+      !this._leaseExpiredAt
+    ) {
+      return err(new LeaseOwnershipConflictError(this.id, this._worker, workerId));
+    }
+
+    const newLeaseId = leaseId(`lease-${crypto.randomUUID()}`);
+    const leaseUntil = new Date(now.getTime() + leaseDurationMs).toISOString();
+
+    this._leaseId = newLeaseId;
+    this._worker = workerId;
+    this._leaseUntil = leaseUntil;
+    this._leaseExpiredAt = undefined;
+    this._version += 1;
+
+    return ok({
+      leaseId: newLeaseId,
+      taskId: this.id,
+      workerId,
+      acquiredAt: nowIso,
+      leaseUntil,
+      version: this._version,
+    });
+  }
+
+  /**
+   * Renews an existing execution lease.
+   */
+  renewLease(
+    workerId: WorkerId,
+    expectedLeaseId: LeaseId,
+    leaseDurationMs: number,
+    now: Date = new Date(),
+  ): Result<TaskLease, LeaseError> {
+    if (this._status !== "running") {
+      return err(
+        new LeaseError(
+          "CONCURRENCY_CONFLICT",
+          `Cannot renew lease for task '${this.id}' in status '${this._status}'. Task must be running.`,
+          this.id,
+          workerId,
+          expectedLeaseId,
+        ),
+      );
+    }
+
+    if (!this._leaseId || this._leaseId !== expectedLeaseId) {
+      return err(new StaleLeaseError(this.id, expectedLeaseId, this._leaseId));
+    }
+
+    if (this._worker && this._worker !== workerId) {
+      return err(
+        new LeaseOwnershipConflictError(
+          this.id,
+          this._worker,
+          workerId,
+        ),
+      );
+    }
+
+    const nowIso = now.toISOString();
+    if (this._leaseExpiredAt || (this._leaseUntil && this._leaseUntil < nowIso)) {
+      return err(new LeaseExpiredError(this.id, expectedLeaseId, workerId));
+    }
+
+    const newLeaseUntil = new Date(now.getTime() + leaseDurationMs).toISOString();
+    this._leaseUntil = newLeaseUntil;
+    this._version += 1;
+
+    return ok({
+      leaseId: expectedLeaseId,
+      taskId: this.id,
+      workerId,
+      acquiredAt: this._startedAt ?? nowIso,
+      leaseUntil: newLeaseUntil,
+      version: this._version,
+    });
+  }
+
+  /**
+   * Explicitly releases an active lease upon completion or graceful shutdown.
+   */
+  releaseLease(workerId: WorkerId, expectedLeaseId: LeaseId): Result<void, LeaseError> {
+    if (this._leaseId && this._leaseId !== expectedLeaseId) {
+      return err(new StaleLeaseError(this.id, expectedLeaseId, this._leaseId));
+    }
+
+    if (this._worker && this._worker !== workerId) {
+      return err(
+        new LeaseOwnershipConflictError(
+          this.id,
+          this._worker,
+          workerId,
+        ),
+      );
+    }
+
+    this._leaseId = undefined;
+    this._leaseUntil = undefined;
+    this._version += 1;
+    return ok(undefined);
+  }
+
+  /**
+   * Marks this task's lease as expired.
+   * INVARIANT: Task remains in 'running' status! Worker identity is preserved.
+   */
+  expireLease(expiredAt: Date = new Date()): Result<void, DomainError> {
+    if (this._leaseExpiredAt) {
+      return ok(undefined);
+    }
+
+    this._leaseExpiredAt = expiredAt.toISOString();
+    this._version += 1;
+    return ok(undefined);
+  }
+
   toSnapshot(): TaskSnapshot {
     return {
       id: this.id,
@@ -259,6 +435,10 @@ export class TaskEntity {
       output: this._output,
       error: this._error,
       dependencies: [...this.dependencies],
+      leaseId: this._leaseId,
+      leaseUntil: this._leaseUntil,
+      leaseExpiredAt: this._leaseExpiredAt,
     };
   }
 }
+

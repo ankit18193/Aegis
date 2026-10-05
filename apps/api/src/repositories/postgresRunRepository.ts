@@ -13,20 +13,30 @@ import type {
   RunStatus,
   RunSummary,
   Task,
+  TaskLease,
   TaskStateUpdate,
   TaskStatus,
 } from "@aegis/contracts";
 import {
+  LeaseError,
+  LeaseExpiredError,
+  LeaseOwnershipConflictError,
+  StaleLeaseError,
+} from "@aegis/contracts";
+import {
   err,
   eventId,
+  leaseId,
   ok,
   runId,
   taskId,
   workerId,
   workflowId,
+  type LeaseId,
   type Result,
   type RunId,
   type TaskId,
+  type WorkerId,
 } from "@aegis/types";
 import {
   and,
@@ -87,6 +97,9 @@ function mapTaskRowToTask(row: typeof tasksTable.$inferSelect): Task {
     output: row.output ?? undefined,
     error: row.error ?? undefined,
     dependencies: row.dependencies ? (row.dependencies as TaskId[]) : undefined,
+    leaseId: row.leaseId ? leaseId(row.leaseId) : undefined,
+    leaseUntil: toIsoString(row.leaseUntil),
+    leaseExpiredAt: toIsoString(row.leaseExpiredAt),
   };
 }
 
@@ -280,6 +293,9 @@ export class PostgresRunRepository implements IRunRepository {
               output: task.output ?? null,
               error: task.error ?? null,
               dependencies: task.dependencies ?? null,
+              leaseId: task.leaseId ?? null,
+              leaseUntil: task.leaseUntil ?? null,
+              leaseExpiredAt: task.leaseExpiredAt ?? null,
             })
             .onConflictDoUpdate({
               target: tasksTable.id,
@@ -295,6 +311,9 @@ export class PostgresRunRepository implements IRunRepository {
                 output: task.output ?? null,
                 error: task.error ?? null,
                 dependencies: task.dependencies ?? null,
+                leaseId: task.leaseId ?? null,
+                leaseUntil: task.leaseUntil ?? null,
+                leaseExpiredAt: task.leaseExpiredAt ?? null,
               },
             });
         }
@@ -445,6 +464,9 @@ export class PostgresRunRepository implements IRunRepository {
             output: task.output ?? null,
             error: task.error ?? null,
             dependencies: task.dependencies ?? null,
+            leaseId: task.leaseId ?? null,
+            leaseUntil: task.leaseUntil ?? null,
+            leaseExpiredAt: task.leaseExpiredAt ?? null,
           });
         }
       }
@@ -501,6 +523,9 @@ export class PostgresRunRepository implements IRunRepository {
         ...(update.completedAt !== undefined ? { completedAt: update.completedAt } : {}),
         ...(update.output !== undefined ? { output: update.output } : {}),
         ...(update.error !== undefined ? { error: update.error } : {}),
+        ...(update.leaseId !== undefined ? { leaseId: update.leaseId } : {}),
+        ...(update.leaseUntil !== undefined ? { leaseUntil: update.leaseUntil } : {}),
+        ...(update.leaseExpiredAt !== undefined ? { leaseExpiredAt: update.leaseExpiredAt } : {}),
         version: expectedVersion + 1,
       })
       .where(
@@ -534,5 +559,299 @@ export class PostgresRunRepository implements IRunRepository {
     }
 
     return ok({ newVersion: firstUpdated.version });
+  }
+
+  async acquireTaskLease(
+    taskId: TaskId,
+    workerId: WorkerId,
+    leaseDurationMs: number,
+    expectedVersion: number,
+  ): Promise<Result<TaskLease, LeaseError>> {
+    const [row] = await this.db
+      .select()
+      .from(tasksTable)
+      .where(eq(tasksTable.id, taskId))
+      .limit(1);
+
+    if (!row) {
+      return err(new LeaseError("TASK_NOT_FOUND", `Task '${taskId}' not found`, taskId, workerId));
+    }
+
+    if (row.status !== "running") {
+      return err(
+        new LeaseError(
+          "CONCURRENCY_CONFLICT",
+          `Task '${taskId}' is in status '${row.status}', must be 'running' to acquire lease`,
+          taskId,
+          workerId,
+        ),
+      );
+    }
+
+    const now = new Date();
+    const nowIso = now.toISOString();
+
+    if (
+      row.leaseId &&
+      row.workerId &&
+      row.workerId !== workerId &&
+      row.leaseUntil &&
+      new Date(row.leaseUntil) > now &&
+      !row.leaseExpiredAt
+    ) {
+      return err(new LeaseOwnershipConflictError(taskId, row.workerId as WorkerId, workerId));
+    }
+
+    const newLeaseId = leaseId(`lease-${crypto.randomUUID()}`);
+    const leaseUntil = new Date(now.getTime() + leaseDurationMs).toISOString();
+
+    const updatedRows = await this.db
+      .update(tasksTable)
+      .set({
+        leaseId: newLeaseId,
+        workerId: workerId,
+        leaseUntil: leaseUntil,
+        leaseExpiredAt: null,
+        version: expectedVersion + 1,
+      })
+      .where(
+        and(
+          eq(tasksTable.id, taskId),
+          eq(tasksTable.version, expectedVersion),
+          eq(tasksTable.status, "running"),
+        ),
+      )
+      .returning({ version: tasksTable.version });
+
+    if (updatedRows.length === 0) {
+      const [currentRow] = await this.db
+        .select({ version: tasksTable.version })
+        .from(tasksTable)
+        .where(eq(tasksTable.id, taskId))
+        .limit(1);
+
+      return err(
+        new LeaseError(
+          "CONCURRENCY_CONFLICT",
+          `Concurrency conflict acquiring lease for task '${taskId}': expected version ${String(expectedVersion)}, actual version is ${String(currentRow?.version ?? "unknown")}`,
+          taskId,
+          workerId,
+        ),
+      );
+    }
+
+    const firstUpdated = updatedRows[0];
+    if (!firstUpdated) {
+      return err(new LeaseError("TASK_NOT_FOUND", `Task '${taskId}' not found`, taskId, workerId));
+    }
+
+    return ok({
+      leaseId: newLeaseId,
+      taskId,
+      workerId,
+      acquiredAt: nowIso,
+      leaseUntil,
+      version: firstUpdated.version,
+    });
+  }
+
+  async renewTaskLease(
+    taskId: TaskId,
+    leaseId: LeaseId,
+    workerId: WorkerId,
+    leaseDurationMs: number,
+    expectedVersion: number,
+  ): Promise<Result<TaskLease, LeaseError>> {
+    const [row] = await this.db
+      .select()
+      .from(tasksTable)
+      .where(eq(tasksTable.id, taskId))
+      .limit(1);
+
+    if (!row) {
+      return err(new LeaseError("TASK_NOT_FOUND", `Task '${taskId}' not found`, taskId, workerId, leaseId));
+    }
+
+    if (row.status !== "running") {
+      return err(
+        new LeaseError(
+          "CONCURRENCY_CONFLICT",
+          `Task '${taskId}' is in status '${row.status}', must be 'running' to renew lease`,
+          taskId,
+          workerId,
+          leaseId,
+        ),
+      );
+    }
+
+    if (!row.leaseId || row.leaseId !== leaseId) {
+      return err(new StaleLeaseError(taskId, leaseId, row.leaseId ? (row.leaseId as unknown as LeaseId) : undefined));
+    }
+
+    if (row.workerId && row.workerId !== workerId) {
+      return err(new LeaseOwnershipConflictError(taskId, row.workerId as WorkerId, workerId));
+    }
+
+    const now = new Date();
+    const nowIso = now.toISOString();
+
+    if (row.leaseExpiredAt || (row.leaseUntil && new Date(row.leaseUntil) < now)) {
+      return err(new LeaseExpiredError(taskId, leaseId, workerId));
+    }
+
+    const newLeaseUntil = new Date(now.getTime() + leaseDurationMs).toISOString();
+
+    const updatedRows = await this.db
+      .update(tasksTable)
+      .set({
+        leaseUntil: newLeaseUntil,
+        version: expectedVersion + 1,
+      })
+      .where(
+        and(
+          eq(tasksTable.id, taskId),
+          eq(tasksTable.version, expectedVersion),
+          eq(tasksTable.leaseId, leaseId),
+          eq(tasksTable.workerId, workerId),
+          eq(tasksTable.status, "running"),
+          sql`${tasksTable.leaseExpiredAt} IS NULL`,
+        ),
+      )
+      .returning({ version: tasksTable.version });
+
+    if (updatedRows.length === 0) {
+      return err(
+        new LeaseError(
+          "CONCURRENCY_CONFLICT",
+          `Concurrency conflict renewing lease for task '${taskId}'`,
+          taskId,
+          workerId,
+          leaseId,
+        ),
+      );
+    }
+
+    const firstUpdated = updatedRows[0];
+    if (!firstUpdated) {
+      return err(
+        new LeaseError(
+          "CONCURRENCY_CONFLICT",
+          `Concurrency conflict renewing lease for task '${taskId}'`,
+          taskId,
+          workerId,
+          leaseId,
+        ),
+      );
+    }
+
+    return ok({
+      leaseId,
+      taskId,
+      workerId,
+      acquiredAt: toIsoString(row.startedAt) ?? nowIso,
+      leaseUntil: newLeaseUntil,
+      version: firstUpdated.version,
+    });
+  }
+
+  async releaseTaskLease(
+    taskId: TaskId,
+    leaseId: LeaseId,
+    workerId: WorkerId,
+    expectedVersion: number,
+  ): Promise<Result<void, LeaseError>> {
+    const [row] = await this.db
+      .select()
+      .from(tasksTable)
+      .where(eq(tasksTable.id, taskId))
+      .limit(1);
+
+    if (!row) {
+      return err(new LeaseError("TASK_NOT_FOUND", `Task '${taskId}' not found`, taskId, workerId, leaseId));
+    }
+
+    if (row.leaseId && row.leaseId !== leaseId) {
+      return err(new StaleLeaseError(taskId, leaseId, row.leaseId ? (row.leaseId as unknown as LeaseId) : undefined));
+    }
+
+    if (row.workerId && row.workerId !== workerId) {
+      return err(new LeaseOwnershipConflictError(taskId, row.workerId as WorkerId, workerId));
+    }
+
+    const updatedRows = await this.db
+      .update(tasksTable)
+      .set({
+        leaseId: null,
+        leaseUntil: null,
+        version: expectedVersion + 1,
+      })
+      .where(
+        and(
+          eq(tasksTable.id, taskId),
+          eq(tasksTable.version, expectedVersion),
+          eq(tasksTable.leaseId, leaseId),
+          eq(tasksTable.workerId, workerId),
+        ),
+      )
+      .returning({ version: tasksTable.version });
+
+    if (updatedRows.length === 0) {
+      return err(
+        new LeaseError(
+          "CONCURRENCY_CONFLICT",
+          `Concurrency conflict releasing lease for task '${taskId}'`,
+          taskId,
+          workerId,
+          leaseId,
+        ),
+      );
+    }
+
+    return ok(undefined);
+  }
+
+  async getExpiredTaskLeases(cutoff: Date, limit = 50): Promise<Task[]> {
+    const cutoffIso = cutoff.toISOString();
+    const rows = await this.db
+      .select()
+      .from(tasksTable)
+      .where(
+        and(
+          eq(tasksTable.status, "running"),
+          sql`${tasksTable.leaseUntil} < ${cutoffIso}::timestamptz`,
+          sql`${tasksTable.leaseExpiredAt} IS NULL`,
+        ),
+      )
+      .orderBy(asc(tasksTable.leaseUntil))
+      .limit(limit);
+
+    return rows.map(mapTaskRowToTask);
+  }
+
+  async markTaskLeaseExpired(
+    taskId: TaskId,
+    expectedVersion: number,
+    expiredAt: Date,
+  ): Promise<boolean> {
+    const expiredAtIso = expiredAt.toISOString();
+
+    const updatedRows = await this.db
+      .update(tasksTable)
+      .set({
+        leaseExpiredAt: expiredAtIso,
+        version: expectedVersion + 1,
+      })
+      .where(
+        and(
+          eq(tasksTable.id, taskId),
+          eq(tasksTable.version, expectedVersion),
+          eq(tasksTable.status, "running"),
+          sql`${tasksTable.leaseUntil} < ${expiredAtIso}::timestamptz`,
+          sql`${tasksTable.leaseExpiredAt} IS NULL`,
+        ),
+      )
+      .returning({ version: tasksTable.version });
+
+    return updatedRows.length > 0;
   }
 }
