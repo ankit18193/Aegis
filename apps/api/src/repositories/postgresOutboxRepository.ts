@@ -13,7 +13,7 @@
 import type { Logger } from "@aegis/logger";
 import type { OutboxEventId } from "@aegis/types";
 import { outboxEventId } from "@aegis/types";
-import { and, asc, eq, inArray, lte, or, sql } from "drizzle-orm";
+import { and, asc, eq, inArray, isNull, lte, or, sql } from "drizzle-orm";
 import type { PostgresJsDatabase } from "drizzle-orm/postgres-js";
 
 import type * as schema from "../db/schema.js";
@@ -105,7 +105,13 @@ export class PostgresOutboxRepository implements IOutboxRepository {
         .from(outboxEventsTable)
         .where(
           or(
-            eq(outboxEventsTable.status, "pending"),
+            and(
+              eq(outboxEventsTable.status, "pending"),
+              or(
+                isNull(outboxEventsTable.lockedUntil),
+                lte(outboxEventsTable.lockedUntil, nowIso),
+              ),
+            ),
             and(
               eq(outboxEventsTable.status, "publishing"),
               lte(outboxEventsTable.lockedUntil, nowIso),

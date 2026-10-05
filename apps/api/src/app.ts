@@ -4,6 +4,7 @@ import fastify, { type FastifyInstance } from "fastify";
 
 import { loadApiConfig } from "./config/index.js";
 import { createDatabaseContext, type DatabaseContext } from "./db/client.js";
+import type { OutboxPublisher } from "./events/outboxPublisher.js";
 import { McpClientManager } from "./mcp/manager.js";
 import type { McpServerConfig } from "./mcp/types.js";
 import { registerCorrelationHooks } from "./middleware/correlation.js";
@@ -29,6 +30,7 @@ export interface BuildAppOptions {
   toolRegistry?: IToolRegistry | undefined;
   mcpClientManager?: McpClientManager | undefined;
   mcpServerConfigs?: readonly McpServerConfig[] | undefined;
+  outboxPublisher?: OutboxPublisher | undefined;
 }
 
 /**
@@ -93,6 +95,13 @@ export async function buildApp(options: BuildAppOptions = {}): Promise<FastifyIn
   if (mcpManager) {
     app.addHook("onClose", async () => {
       await mcpManager.close();
+    });
+  }
+
+  if (options.outboxPublisher) {
+    const publisher = options.outboxPublisher;
+    app.addHook("onClose", async () => {
+      await publisher.stop();
     });
   }
 

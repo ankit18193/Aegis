@@ -12,8 +12,16 @@ import { sql } from "drizzle-orm";
 import { buildApp } from "./app.js";
 import { loadApiConfig } from "./config/index.js";
 import { createDatabaseContext, type DatabaseContext } from "./db/client.js";
+import { OutboxPublisher } from "./events/outboxPublisher.js";
+import { KafkaClientManager } from "./infrastructure/kafka/client.js";
+import {
+  initializeKafkaPublisher,
+  registerKafkaLifecycleHooks,
+} from "./infrastructure/kafka/lifecycle.js";
+import { KafkaEventPublisher } from "./infrastructure/kafka/publisher.js";
 import { McpProcessRegistry } from "./mcp/lifecycle.js";
 import { InMemoryRunRepository } from "./repositories/inMemoryRunRepository.js";
+import { PostgresOutboxRepository } from "./repositories/postgresOutboxRepository.js";
 import { PostgresRunRepository } from "./repositories/postgresRunRepository.js";
 import type { IRunRepository } from "./repositories/runRepository.js";
 
@@ -65,11 +73,36 @@ async function main(): Promise<void> {
     logger.warn("No DATABASE_URL configured; falling back to in-memory repository");
   }
 
+  let outboxPublisher: OutboxPublisher | undefined;
+  let eventPublisher: KafkaEventPublisher | undefined;
+  if (databaseContext) {
+    const outboxRepo = new PostgresOutboxRepository(databaseContext.db, logger);
+    const kafkaManager = new KafkaClientManager({ config: config.kafka, logger });
+    eventPublisher = new KafkaEventPublisher({
+      producer: kafkaManager.getProducer(),
+      topic: config.kafka.eventsTopic,
+      logger,
+    });
+    await initializeKafkaPublisher(eventPublisher, logger);
+
+    outboxPublisher = new OutboxPublisher({
+      outboxRepository: outboxRepo,
+      eventPublisher,
+      logger,
+    });
+    outboxPublisher.start();
+  }
+
   const app = await buildApp({
     logger,
     runRepository: repository,
     databaseContext,
+    outboxPublisher,
   });
+
+  if (eventPublisher) {
+    registerKafkaLifecycleHooks(app, { publisher: eventPublisher, logger });
+  }
 
   McpProcessRegistry.getInstance().attachSignalHandlers();
 
@@ -97,6 +130,9 @@ async function main(): Promise<void> {
       logger.info(`Received ${signal}, shutting down gracefully...`);
       void (async () => {
         McpProcessRegistry.getInstance().detachSignalHandlers();
+        if (outboxPublisher) {
+          await outboxPublisher.stop();
+        }
         await app.close();
         if (databaseContext) {
           await databaseContext.close();

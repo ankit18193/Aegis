@@ -48,14 +48,14 @@ export class InMemoryOutboxRepository implements IOutboxRepository {
 
     const candidates: OutboxRecord[] = [];
     for (const record of this.records.values()) {
-      const isPending = record.status === "pending";
+      const isPendingUnlocked =
+        record.status === "pending" &&
+        (!record.lockedUntil || new Date(record.lockedUntil) <= now);
       const isExpiredLock =
         record.status === "publishing" &&
-        record.lockedUntil !== undefined &&
-        record.lockedUntil !== null &&
-        new Date(record.lockedUntil) <= now;
+        Boolean(record.lockedUntil && new Date(record.lockedUntil) <= now);
 
-      if (isPending || isExpiredLock) {
+      if (isPendingUnlocked || isExpiredLock) {
         candidates.push(record);
       }
     }
