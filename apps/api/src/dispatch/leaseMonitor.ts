@@ -146,6 +146,7 @@ export class TaskLeaseMonitor {
               taskName: task.name,
               worker: task.workerId,
               metadata: {
+                worker: task.workerId,
                 expiredAt: now.toISOString(),
                 previousVersion: task.version,
                 leaseId: task.leaseId,
