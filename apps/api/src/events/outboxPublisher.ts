@@ -228,11 +228,11 @@ export class OutboxPublisher {
     });
 
     for (const record of claimedRecords) {
-      const nextAttempt = record.attemptCount + 1;
-      const isTerminal = nextAttempt >= this.maxAttempts;
+      const attemptsUsed = record.attemptCount;
+      const isTerminal = attemptsUsed >= this.maxAttempts;
       const delayMs = Math.min(
         this.backoffMaxMs,
-        this.backoffBaseMs * Math.pow(2, nextAttempt - 1),
+        this.backoffBaseMs * Math.pow(2, Math.max(0, attemptsUsed - 1)),
       );
       const nextLockedUntil = isTerminal ? undefined : new Date(Date.now() + delayMs);
 
