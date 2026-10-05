@@ -52,6 +52,7 @@ import type { PostgresJsDatabase } from "drizzle-orm/postgres-js";
 
 import type { DatabaseContext } from "../db/client.js";
 import {
+  outboxEventsTable,
   runEventsTable,
   runsTable,
   tasksTable,
@@ -62,6 +63,7 @@ import {
   TaskNotFoundError,
 } from "../domain/errors.js";
 import { assertValidTaskTransition } from "../domain/lifecycle.js";
+import { toEventEnvelope } from "../events/envelope.js";
 
 import type {
   EventFilterOptions,
@@ -332,7 +334,7 @@ export class PostgresRunRepository implements IRunRepository {
         await tx.delete(tasksTable).where(eq(tasksTable.runId, run.id));
       }
 
-      // 3. Atomically persist domain events if provided
+      // 3. Atomically persist domain events and outbox records if provided
       if (events && events.length > 0) {
         for (const event of events) {
           await tx
@@ -360,6 +362,26 @@ export class PostgresRunRepository implements IRunRepository {
                 metadata: event.metadata ?? null,
               },
             });
+
+          const envelope = toEventEnvelope(event, {
+            source: "aegis.api",
+            correlationId: event.runId,
+          });
+          const createdAt = event.timestamp || new Date().toISOString();
+
+          await tx
+            .insert(outboxEventsTable)
+            .values({
+              id: event.id,
+              aggregateId: envelope.aggregateId,
+              aggregateType: envelope.aggregateType,
+              eventType: envelope.type,
+              payload: envelope,
+              status: "pending",
+              attemptCount: 0,
+              createdAt,
+            })
+            .onConflictDoNothing({ target: outboxEventsTable.id });
         }
       }
     });
@@ -403,22 +425,12 @@ export class PostgresRunRepository implements IRunRepository {
   }
 
   async saveEvent(event: RunEvent): Promise<void> {
-    await this.db
-      .insert(runEventsTable)
-      .values({
-        id: event.id,
-        runId: event.runId,
-        type: event.type,
-        severity: event.severity,
-        timestamp: event.timestamp,
-        message: event.message,
-        taskId: event.taskId ?? null,
-        taskName: event.taskName ?? null,
-        metadata: event.metadata ?? null,
-      })
-      .onConflictDoUpdate({
-        target: runEventsTable.id,
-        set: {
+    await this.db.transaction(async (tx) => {
+      await tx
+        .insert(runEventsTable)
+        .values({
+          id: event.id,
+          runId: event.runId,
           type: event.type,
           severity: event.severity,
           timestamp: event.timestamp,
@@ -426,12 +438,45 @@ export class PostgresRunRepository implements IRunRepository {
           taskId: event.taskId ?? null,
           taskName: event.taskName ?? null,
           metadata: event.metadata ?? null,
-        },
+        })
+        .onConflictDoUpdate({
+          target: runEventsTable.id,
+          set: {
+            type: event.type,
+            severity: event.severity,
+            timestamp: event.timestamp,
+            message: event.message,
+            taskId: event.taskId ?? null,
+            taskName: event.taskName ?? null,
+            metadata: event.metadata ?? null,
+          },
+        });
+
+      const envelope = toEventEnvelope(event, {
+        source: "aegis.api",
+        correlationId: event.runId,
       });
+      const createdAt = event.timestamp || new Date().toISOString();
+
+      await tx
+        .insert(outboxEventsTable)
+        .values({
+          id: event.id,
+          aggregateId: envelope.aggregateId,
+          aggregateType: envelope.aggregateType,
+          eventType: envelope.type,
+          payload: envelope,
+          status: "pending",
+          attemptCount: 0,
+          createdAt,
+        })
+        .onConflictDoNothing({ target: outboxEventsTable.id });
+    });
   }
 
   async resetToDefaults(): Promise<void> {
     await this.db.transaction(async (tx) => {
+      await tx.delete(outboxEventsTable);
       await tx.delete(runEventsTable);
       await tx.delete(tasksTable);
       await tx.delete(runsTable);
@@ -495,71 +540,123 @@ export class PostgresRunRepository implements IRunRepository {
     targetTaskId: TaskId,
     update: TaskStateUpdate,
     expectedVersion: number,
+    event?: RunEvent,
   ): Promise<Result<{ readonly newVersion: number }, ConcurrencyConflictError | DomainError>> {
-    // 1. Fetch current task row to verify existence and check terminal status
-    const [existingRow] = await this.db
-      .select()
-      .from(tasksTable)
-      .where(eq(tasksTable.id, targetTaskId))
-      .limit(1);
-
-    if (!existingRow) {
-      return err(new TaskNotFoundError(targetTaskId));
-    }
-
-    // 2. Validate lifecycle transition and check terminal state immutability
-    const currentStatus = existingRow.status as TaskStatus;
-    const transitionCheck = assertValidTaskTransition(currentStatus, update.status);
-    if (!transitionCheck.ok) {
-      return transitionCheck;
-    }
-
-    // 3. Perform atomic update guarded by expectedVersion
-    const updatedRows = await this.db
-      .update(tasksTable)
-      .set({
-        status: update.status,
-        ...(update.workerId !== undefined ? { workerId: update.workerId } : {}),
-        ...(update.startedAt !== undefined ? { startedAt: update.startedAt } : {}),
-        ...(update.completedAt !== undefined ? { completedAt: update.completedAt } : {}),
-        ...(update.output !== undefined ? { output: update.output } : {}),
-        ...(update.error !== undefined ? { error: update.error } : {}),
-        ...(update.leaseId !== undefined ? { leaseId: update.leaseId } : {}),
-        ...(update.leaseUntil !== undefined ? { leaseUntil: update.leaseUntil } : {}),
-        ...(update.leaseExpiredAt !== undefined ? { leaseExpiredAt: update.leaseExpiredAt } : {}),
-        version: expectedVersion + 1,
-      })
-      .where(
-        and(
-          eq(tasksTable.id, targetTaskId),
-          eq(tasksTable.version, expectedVersion),
-        ),
-      )
-      .returning({ version: tasksTable.version });
-
-    if (updatedRows.length === 0) {
-      // Re-fetch to report actual current version
-      const [currentRow] = await this.db
-        .select({ version: tasksTable.version })
+    return await this.db.transaction(async (tx) => {
+      // 1. Fetch current task row to verify existence and check terminal status
+      const [existingRow] = await tx
+        .select()
         .from(tasksTable)
         .where(eq(tasksTable.id, targetTaskId))
         .limit(1);
 
-      return err(
-        new ConcurrencyConflictError(
-          targetTaskId,
-          expectedVersion,
-          currentRow?.version,
-        ),
-      );
-    }
+      if (!existingRow) {
+        return err(new TaskNotFoundError(targetTaskId));
+      }
 
-    const firstUpdated = updatedRows[0];
-    if (!firstUpdated) {
-      return err(new TaskNotFoundError(targetTaskId));
-    }
+      // 2. Validate lifecycle transition and check terminal state immutability
+      const currentStatus = existingRow.status as TaskStatus;
+      const transitionCheck = assertValidTaskTransition(currentStatus, update.status);
+      if (!transitionCheck.ok) {
+        return transitionCheck;
+      }
 
-    return ok({ newVersion: firstUpdated.version });
+      // 3. Perform atomic update guarded by expectedVersion
+      const updatedRows = await tx
+        .update(tasksTable)
+        .set({
+          status: update.status,
+          ...(update.workerId !== undefined ? { workerId: update.workerId } : {}),
+          ...(update.startedAt !== undefined ? { startedAt: update.startedAt } : {}),
+          ...(update.completedAt !== undefined ? { completedAt: update.completedAt } : {}),
+          ...(update.output !== undefined ? { output: update.output } : {}),
+          ...(update.error !== undefined ? { error: update.error } : {}),
+          ...(update.leaseId !== undefined ? { leaseId: update.leaseId } : {}),
+          ...(update.leaseUntil !== undefined ? { leaseUntil: update.leaseUntil } : {}),
+          ...(update.leaseExpiredAt !== undefined ? { leaseExpiredAt: update.leaseExpiredAt } : {}),
+          version: expectedVersion + 1,
+        })
+        .where(
+          and(
+            eq(tasksTable.id, targetTaskId),
+            eq(tasksTable.version, expectedVersion),
+          ),
+        )
+        .returning({ version: tasksTable.version });
+
+      if (updatedRows.length === 0) {
+        // Re-fetch to report actual current version
+        const [currentRow] = await tx
+          .select({ version: tasksTable.version })
+          .from(tasksTable)
+          .where(eq(tasksTable.id, targetTaskId))
+          .limit(1);
+
+        return err(
+          new ConcurrencyConflictError(
+            targetTaskId,
+            expectedVersion,
+            currentRow?.version,
+          ),
+        );
+      }
+
+      const firstUpdated = updatedRows[0];
+      if (!firstUpdated) {
+        return err(new TaskNotFoundError(targetTaskId));
+      }
+
+      // 4. Atomically persist domain event and outbox record if provided
+      if (event) {
+        await tx
+          .insert(runEventsTable)
+          .values({
+            id: event.id,
+            runId: event.runId,
+            type: event.type,
+            severity: event.severity,
+            timestamp: event.timestamp,
+            message: event.message,
+            taskId: event.taskId ?? null,
+            taskName: event.taskName ?? null,
+            metadata: event.metadata ?? null,
+          })
+          .onConflictDoUpdate({
+            target: runEventsTable.id,
+            set: {
+              type: event.type,
+              severity: event.severity,
+              timestamp: event.timestamp,
+              message: event.message,
+              taskId: event.taskId ?? null,
+              taskName: event.taskName ?? null,
+              metadata: event.metadata ?? null,
+            },
+          });
+
+        const envelope = toEventEnvelope(event, {
+          source: "aegis.api",
+          correlationId: event.runId,
+        });
+        const createdAt = event.timestamp || new Date().toISOString();
+
+        await tx
+          .insert(outboxEventsTable)
+          .values({
+            id: event.id,
+            aggregateId: envelope.aggregateId,
+            aggregateType: envelope.aggregateType,
+            eventType: envelope.type,
+            payload: envelope,
+            status: "pending",
+            attemptCount: 0,
+            createdAt,
+          })
+          .onConflictDoNothing({ target: outboxEventsTable.id });
+      }
+
+      return ok({ newVersion: firstUpdated.version });
+    });
   }
 
   async acquireTaskLease(
@@ -833,26 +930,81 @@ export class PostgresRunRepository implements IRunRepository {
     taskId: TaskId,
     expectedVersion: number,
     expiredAt: Date,
+    event?: RunEvent,
   ): Promise<boolean> {
     const expiredAtIso = expiredAt.toISOString();
 
-    const updatedRows = await this.db
-      .update(tasksTable)
-      .set({
-        leaseExpiredAt: expiredAtIso,
-        version: expectedVersion + 1,
-      })
-      .where(
-        and(
-          eq(tasksTable.id, taskId),
-          eq(tasksTable.version, expectedVersion),
-          eq(tasksTable.status, "running"),
-          sql`${tasksTable.leaseUntil} < ${expiredAtIso}::timestamptz`,
-          sql`${tasksTable.leaseExpiredAt} IS NULL`,
-        ),
-      )
-      .returning({ version: tasksTable.version });
+    return await this.db.transaction(async (tx) => {
+      const updatedRows = await tx
+        .update(tasksTable)
+        .set({
+          leaseExpiredAt: expiredAtIso,
+          version: expectedVersion + 1,
+        })
+        .where(
+          and(
+            eq(tasksTable.id, taskId),
+            eq(tasksTable.version, expectedVersion),
+            eq(tasksTable.status, "running"),
+            sql`${tasksTable.leaseUntil} < ${expiredAtIso}::timestamptz`,
+            sql`${tasksTable.leaseExpiredAt} IS NULL`,
+          ),
+        )
+        .returning({ version: tasksTable.version });
 
-    return updatedRows.length > 0;
+      if (updatedRows.length === 0) {
+        return false;
+      }
+
+      if (event) {
+        await tx
+          .insert(runEventsTable)
+          .values({
+            id: event.id,
+            runId: event.runId,
+            type: event.type,
+            severity: event.severity,
+            timestamp: event.timestamp,
+            message: event.message,
+            taskId: event.taskId ?? null,
+            taskName: event.taskName ?? null,
+            metadata: event.metadata ?? null,
+          })
+          .onConflictDoUpdate({
+            target: runEventsTable.id,
+            set: {
+              type: event.type,
+              severity: event.severity,
+              timestamp: event.timestamp,
+              message: event.message,
+              taskId: event.taskId ?? null,
+              taskName: event.taskName ?? null,
+              metadata: event.metadata ?? null,
+            },
+          });
+
+        const envelope = toEventEnvelope(event, {
+          source: "aegis.api",
+          correlationId: event.runId,
+        });
+        const createdAt = event.timestamp || new Date().toISOString();
+
+        await tx
+          .insert(outboxEventsTable)
+          .values({
+            id: event.id,
+            aggregateId: envelope.aggregateId,
+            aggregateType: envelope.aggregateType,
+            eventType: envelope.type,
+            payload: envelope,
+            status: "pending",
+            attemptCount: 0,
+            createdAt,
+          })
+          .onConflictDoNothing({ target: outboxEventsTable.id });
+      }
+
+      return true;
+    });
   }
 }

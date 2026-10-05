@@ -1,4 +1,4 @@
-import type { Task } from "@aegis/contracts";
+import type { RunEvent, Task } from "@aegis/contracts";
 import type { Logger } from "@aegis/logger";
 import { eventId } from "@aegis/types";
 
@@ -112,11 +112,33 @@ export class TaskLeaseMonitor {
     let conflictsSkipped = 0;
 
     for (const task of candidates) {
-      // 2. Atomic optimistic mutation guarded by expectedVersion
+      const event: RunEvent | undefined = task.runId
+        ? {
+            id: eventId(`evt-lease-exp-${task.id}-${String(task.version + 1)}`),
+            runId: task.runId,
+            type: "task_lease_expired",
+            severity: "warn",
+            timestamp: now.toISOString(),
+            message: `Task lease expired for worker '${task.workerId ?? "unknown"}'. Task remains running pending Phase 12D recovery.`,
+            taskId: task.id,
+            taskName: task.name,
+            worker: task.workerId,
+            metadata: {
+              worker: task.workerId,
+              expiredAt: now.toISOString(),
+              previousVersion: task.version,
+              leaseId: task.leaseId,
+              leaseUntil: task.leaseUntil,
+            },
+          }
+        : undefined;
+
+      // 2. Atomic optimistic mutation guarded by expectedVersion with transactional event and outbox record
       const marked = await this.repository.markTaskLeaseExpired(
         task.id,
         task.version,
         now,
+        event,
       );
 
       if (marked) {
@@ -132,36 +154,7 @@ export class TaskLeaseMonitor {
           expiredAt: now.toISOString(),
         });
 
-        // 3. Save audit event for timeline visibility
-        if (task.runId) {
-          try {
-            await this.repository.saveEvent({
-              id: eventId(`evt-lease-exp-${task.id}-${String(task.version + 1)}`),
-              runId: task.runId,
-              type: "task_lease_expired",
-              severity: "warn",
-              timestamp: now.toISOString(),
-              message: `Task lease expired for worker '${task.workerId ?? "unknown"}'. Task remains running pending Phase 12D recovery.`,
-              taskId: task.id,
-              taskName: task.name,
-              worker: task.workerId,
-              metadata: {
-                worker: task.workerId,
-                expiredAt: now.toISOString(),
-                previousVersion: task.version,
-                leaseId: task.leaseId,
-                leaseUntil: task.leaseUntil,
-              },
-            });
-          } catch (eventErr: unknown) {
-            this.logger?.warn("Failed to record task_lease_expired event", {
-              taskId: task.id,
-              error: eventErr instanceof Error ? eventErr.message : String(eventErr),
-            });
-          }
-        }
-
-        // 4. Trigger optional listener callback
+        // 3. Trigger optional listener callback
         try {
           this.onLeaseExpired?.(task);
         } catch (listenerErr: unknown) {

@@ -48,12 +48,14 @@ export interface IRunRepository {
 
   /**
    * Atomically updates a task's durable execution state with optimistic concurrency control.
+   * If event is provided, atomically inserts the domain event and outbox record within the same transaction.
    * Returns a typed error if the task is not found, in a terminal state, or has a version conflict.
    */
   updateTaskState(
     taskId: TaskId,
     update: TaskStateUpdate,
     expectedVersion: number,
+    event?: RunEvent,
   ): Promise<Result<{ readonly newVersion: number }, ConcurrencyConflictError | DomainError>>;
 
   /**
@@ -94,6 +96,7 @@ export interface IRunRepository {
 
   /**
    * Atomically marks a task's lease as expired guarded by expectedVersion and lease_until < expiredAt.
+   * If event is provided, atomically inserts the domain event and outbox record within the same transaction.
    * Returns true if successfully marked expired, or false if already mutated or version conflict.
    * INVARIANT: Task remains in 'running' status; worker identity is preserved.
    */
@@ -101,6 +104,7 @@ export interface IRunRepository {
     taskId: TaskId,
     expectedVersion: number,
     expiredAt: Date,
+    event?: RunEvent,
   ): Promise<boolean>;
 }
 

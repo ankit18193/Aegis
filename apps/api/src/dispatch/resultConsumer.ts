@@ -1,6 +1,7 @@
-import type { TaskResultEnvelope } from "@aegis/contracts";
+import type { RunEvent, TaskResultEnvelope } from "@aegis/contracts";
 import { taskResultEnvelopeSchema } from "@aegis/contracts";
 import type { Logger } from "@aegis/logger";
+import { eventId } from "@aegis/types";
 import type { Consumer } from "kafkajs";
 
 import type { IRunRepository } from "../repositories/runRepository.js";
@@ -145,7 +146,26 @@ export class TaskResultConsumer {
           : JSON.stringify(output)
         : undefined;
 
-    // 2. Perform atomic update with optimistic concurrency
+    const event: RunEvent = {
+      id: eventId(`evt-res-${taskId}-${String(task.version + 1)}`),
+      runId,
+      type: targetStatus === "completed" ? "task_completed" : "task_failed",
+      severity: targetStatus === "completed" ? "success" : "error",
+      timestamp: completedAt,
+      message:
+        targetStatus === "completed"
+          ? `Task '${task.name}' completed`
+          : `Task '${task.name}' failed: ${error?.message ?? "unknown error"}`,
+      taskId,
+      taskName: task.name,
+      metadata: {
+        workerId,
+        output: serializedOutput,
+        error: error ? { message: error.message, stack: error.stack } : undefined,
+      },
+    };
+
+    // 2. Perform atomic update with optimistic concurrency and transactional outbox event
     const updateRes = await this.runRepository.updateTaskState(
       taskId,
       {
@@ -156,6 +176,7 @@ export class TaskResultConsumer {
         error: error?.message,
       },
       task.version,
+      event,
     );
 
     if (!updateRes.ok) {

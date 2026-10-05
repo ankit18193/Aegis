@@ -1,4 +1,12 @@
-import type { Run, RunEvent, RunSummary, Task, TaskLease, TaskStateUpdate } from "@aegis/contracts";
+import type {
+  OutboxRecord,
+  Run,
+  RunEvent,
+  RunSummary,
+  Task,
+  TaskLease,
+  TaskStateUpdate,
+} from "@aegis/contracts";
 import {
   LeaseError,
   LeaseExpiredError,
@@ -6,19 +14,24 @@ import {
   StaleLeaseError,
 } from "@aegis/contracts";
 import type { LeaseId, Result, RunId, TaskId, WorkerId } from "@aegis/types";
-import { err, leaseId, ok } from "@aegis/types";
+import { err, leaseId, ok, outboxEventId } from "@aegis/types";
 
 import { ConcurrencyConflictError, type DomainError, TaskNotFoundError } from "../domain/errors.js";
 import { assertValidTaskTransition } from "../domain/lifecycle.js";
+import { toEventEnvelope } from "../events/envelope.js";
 
+import type { IOutboxRepository } from "./outboxRepository.js";
 import type { EventFilterOptions, FindAllRunsResult, IRunRepository, RunFilterOptions } from "./runRepository.js";
 import { getInitialSeedEvents, getInitialSeedRuns } from "./seeds.js";
 
 export class InMemoryRunRepository implements IRunRepository {
   private readonly runs = new Map<RunId, Run>();
   private readonly events = new Map<RunId, RunEvent[]>();
+  private readonly outboxEvents: OutboxRecord[] = [];
+  private readonly outboxRepo: IOutboxRepository | undefined;
 
-  constructor(seed = true) {
+  constructor(seed = true, outboxRepo?: IOutboxRepository) {
+    this.outboxRepo = outboxRepo;
     if (seed) {
       this.populateSeeds();
     }
@@ -97,6 +110,11 @@ export class InMemoryRunRepository implements IRunRepository {
       const list = this.events.get(run.id) ?? [];
       for (const event of events) {
         list.push(structuredClone(event));
+        const outboxRecord = this.toOutboxRecord(event);
+        this.outboxEvents.push(outboxRecord);
+        if (this.outboxRepo) {
+          void this.outboxRepo.insert([outboxRecord]);
+        }
       }
       this.events.set(run.id, list);
     }
@@ -135,10 +153,16 @@ export class InMemoryRunRepository implements IRunRepository {
     const existing = this.events.get(event.runId) ?? [];
     existing.push(structuredClone(event));
     this.events.set(event.runId, existing);
+    const outboxRecord = this.toOutboxRecord(event);
+    this.outboxEvents.push(outboxRecord);
+    if (this.outboxRepo) {
+      void this.outboxRepo.insert([outboxRecord]);
+    }
     return Promise.resolve();
   }
 
   resetToDefaults(): Promise<void> {
+    this.outboxEvents.length = 0;
     this.populateSeeds();
     return Promise.resolve();
   }
@@ -147,6 +171,7 @@ export class InMemoryRunRepository implements IRunRepository {
     taskId: TaskId,
     update: TaskStateUpdate,
     expectedVersion: number,
+    event?: RunEvent,
   ): Promise<Result<{ readonly newVersion: number }, ConcurrencyConflictError | DomainError>> {
     for (const run of this.runs.values()) {
       const taskIndex = run.tasks.findIndex((t) => t.id === taskId);
@@ -185,6 +210,18 @@ export class InMemoryRunRepository implements IRunRepository {
         };
         run.tasks[taskIndex] = updatedTask;
         run.updatedAt = new Date().toISOString();
+
+        if (event) {
+          const list = this.events.get(event.runId) ?? [];
+          list.push(structuredClone(event));
+          this.events.set(event.runId, list);
+          const outboxRecord = this.toOutboxRecord(event);
+          this.outboxEvents.push(outboxRecord);
+          if (this.outboxRepo) {
+            void this.outboxRepo.insert([outboxRecord]);
+          }
+        }
+
         return Promise.resolve(ok({ newVersion }));
       }
     }
@@ -444,6 +481,7 @@ export class InMemoryRunRepository implements IRunRepository {
     taskId: TaskId,
     expectedVersion: number,
     expiredAt: Date,
+    event?: RunEvent,
   ): Promise<boolean> {
     const expiredAtIso = expiredAt.toISOString();
 
@@ -463,6 +501,18 @@ export class InMemoryRunRepository implements IRunRepository {
           task.leaseExpiredAt = expiredAtIso;
           task.version = expectedVersion + 1;
           run.updatedAt = expiredAtIso;
+
+          if (event) {
+            const list = this.events.get(event.runId) ?? [];
+            list.push(structuredClone(event));
+            this.events.set(event.runId, list);
+            const outboxRecord = this.toOutboxRecord(event);
+            this.outboxEvents.push(outboxRecord);
+            if (this.outboxRepo) {
+              void this.outboxRepo.insert([outboxRecord]);
+            }
+          }
+
           return Promise.resolve(true);
         }
 
@@ -471,5 +521,26 @@ export class InMemoryRunRepository implements IRunRepository {
     }
 
     return Promise.resolve(false);
+  }
+
+  private toOutboxRecord(event: RunEvent): OutboxRecord {
+    const envelope = toEventEnvelope(event, {
+      source: "aegis.api",
+      correlationId: event.runId,
+    });
+    return {
+      id: outboxEventId(event.id),
+      aggregateId: envelope.aggregateId,
+      aggregateType: envelope.aggregateType,
+      eventType: envelope.type,
+      payload: envelope,
+      status: "pending",
+      attemptCount: 0,
+      createdAt: event.timestamp,
+    };
+  }
+
+  getOutboxEvents(): OutboxRecord[] {
+    return structuredClone(this.outboxEvents);
   }
 }

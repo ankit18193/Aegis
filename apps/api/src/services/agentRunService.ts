@@ -215,9 +215,11 @@ export class AgentRunService {
     const runDto = mapSnapshotToRunDto(runAggregate.toSnapshot());
     const initialEvents = runAggregate.pullEvents().map(mapDomainEventToRunEvent);
 
-    // Atomic persistence of run and initial creation event
+    // Atomic persistence of run, initial creation events, and durable outbox records
     await this.repository.save(runDto, initialEvents);
-    await this.publishEventsSafely(initialEvents);
+    if (this.eventPublicationService) {
+      await this.publishEventsSafely(initialEvents);
+    }
 
     this.logger?.info("Execution run created", {
       runId: runDto.id,
@@ -260,12 +262,14 @@ export class AgentRunService {
 
     const run = ExecutionRun.reconstitute(mapDtoToRunSnapshot(existing));
 
-    // Helper to persist intermediate state atomically and publish post-commit
+    // Helper to persist intermediate state atomically (and dispatch to legacy publisher if configured)
     const persistSnapshot = async (): Promise<void> => {
       const intermediateDto = mapSnapshotToRunDto(run.toSnapshot());
       const stepEvents = run.pullEvents().map(mapDomainEventToRunEvent);
       await this.repository.save(intermediateDto, stepEvents);
-      await this.publishEventsSafely(stepEvents);
+      if (this.eventPublicationService) {
+        await this.publishEventsSafely(stepEvents);
+      }
     };
 
     // Construct WorkflowDefinition from reconstituted run
@@ -414,9 +418,11 @@ export class AgentRunService {
     const updatedDto = mapSnapshotToRunDto(run.toSnapshot());
     const events = run.pullEvents().map(mapDomainEventToRunEvent);
 
-    // Atomic persistence of cancelled run and cancellation events
+    // Atomic persistence of cancelled run, cancellation events, and durable outbox records
     await this.repository.save(updatedDto, events);
-    await this.publishEventsSafely(events);
+    if (this.eventPublicationService) {
+      await this.publishEventsSafely(events);
+    }
 
     this.logger?.info("Execution run cancelled", {
       runId: id,
