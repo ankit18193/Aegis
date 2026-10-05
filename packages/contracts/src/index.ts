@@ -88,3 +88,4 @@ export * from "./taskExecution.js";
 export * from "./workerHeartbeat.js";
 export * from "./taskDispatch.js";
 export * from "./leases.js";
+export * from "./outbox.js";

@@ -34,6 +34,9 @@ export type HeartbeatId = Brand<string, "HeartbeatId">;
 /** A unique identifier for a Task Lease. */
 export type LeaseId = Brand<string, "LeaseId">;
 
+/** A unique identifier for a Transactional Outbox Event. */
+export type OutboxEventId = Brand<string, "OutboxEventId">;
+
 /**
  * Creates a branded RunId from a raw string.
  * Use this at trust boundaries (e.g., when reading from an API or database).
@@ -97,6 +100,13 @@ export function heartbeatId(raw: string): HeartbeatId {
  */
 export function leaseId(raw: string): LeaseId {
   return raw as LeaseId;
+}
+
+/**
+ * Creates a branded OutboxEventId from a raw string.
+ */
+export function outboxEventId(raw: string): OutboxEventId {
+  return raw as OutboxEventId;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
