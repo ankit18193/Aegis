@@ -57,6 +57,7 @@ describe("Distributed Scheduling & End-to-End Task Dispatch Pipeline (Phase 11E 
       status: "pending",
       description: `Description for ${name}`,
       attemptCount: 0,
+      version: 1,
       dependencies: [],
       input: requiredTools.length > 0 ? { requiredTools } : undefined,
     };

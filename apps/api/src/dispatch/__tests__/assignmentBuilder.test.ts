@@ -11,6 +11,7 @@ describe("buildTaskAssignment (Phase 11E — Commit 3)", () => {
       status: "pending" as const,
       description: "Clean CSV input",
       attemptCount: 0,
+      version: 1,
       dependencies: [],
     };
     const targetWorkerId = workerId("worker-node-7");

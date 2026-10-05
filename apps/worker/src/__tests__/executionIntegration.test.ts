@@ -92,6 +92,7 @@ describe("Worker Task Execution & Result Reporting End-to-End Integration (Phase
         status: "queued",
         description: "Calculate metric and summarize",
         attemptCount: 0,
+        version: 1,
         input: {
           expression: "42 * 2",
           goal: "Execute mathematical expression",

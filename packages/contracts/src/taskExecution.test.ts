@@ -305,6 +305,7 @@ describe("Task Execution Contracts & Schemas (Phase 11C — Commit 1)", () => {
             status: "pending",
             description: "",
             attemptCount: 0,
+            version: 1,
           },
           assignedAt: new Date().toISOString(),
         },

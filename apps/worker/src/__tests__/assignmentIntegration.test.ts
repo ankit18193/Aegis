@@ -63,6 +63,7 @@ describe("Distributed Task Assignment End-to-End Integration (Phase 11B — Comm
         status: "queued",
         description: "Analyze dataset",
         attemptCount: 0,
+        version: 1,
         input: { dataset: "sales_q3.csv" },
       },
       assignedAt: "2026-10-02T00:00:00.000Z",

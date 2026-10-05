@@ -130,8 +130,8 @@ export class ConcurrencyConflictError extends DomainError {
     readonly expectedVersion: number,
     readonly actualVersion?: number,
   ) {
-    const actualDetail = actualVersion !== undefined ? `, actual version is ${actualVersion}` : "";
-    super(`Concurrency conflict updating task '${taskId}': expected version ${expectedVersion}${actualDetail}`);
+    const actualDetail = actualVersion !== undefined ? `, actual version is ${String(actualVersion)}` : "";
+    super(`Concurrency conflict updating task '${taskId}': expected version ${String(expectedVersion)}${actualDetail}`);
   }
 }
 

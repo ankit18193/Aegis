@@ -184,6 +184,7 @@ describe.runIf(dbAvailable)("PostgresRunRepository Integration Tests (Real Postg
             description: "Step one description",
             status: "pending",
             attemptCount: 0,
+            version: 1,
           },
           {
             id: taskId("task-test-02"),
@@ -191,6 +192,7 @@ describe.runIf(dbAvailable)("PostgresRunRepository Integration Tests (Real Postg
             description: "Step two description",
             status: "pending",
             attemptCount: 0,
+            version: 1,
             dependencies: [taskId("task-test-01")],
           },
         ],
@@ -227,6 +229,7 @@ describe.runIf(dbAvailable)("PostgresRunRepository Integration Tests (Real Postg
         description: "Verify sustained throughput under 500 connections.",
         status: "queued",
         attemptCount: 0,
+        version: 1,
       });
 
       // Remove task-105

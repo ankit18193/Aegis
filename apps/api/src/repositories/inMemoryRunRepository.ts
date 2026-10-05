@@ -1,9 +1,10 @@
-import type { Run, RunEvent, RunSummary, TaskStateUpdate } from "@aegis/contracts";
+import type { Run, RunEvent, RunSummary, Task, TaskStateUpdate } from "@aegis/contracts";
 import type { Result, RunId, TaskId } from "@aegis/types";
 import { err, ok } from "@aegis/types";
 
-import { ConcurrencyConflictError, TaskNotFoundError } from "../domain/errors.js";
+import { ConcurrencyConflictError, type DomainError, TaskNotFoundError } from "../domain/errors.js";
 import { assertValidTaskTransition } from "../domain/lifecycle.js";
+
 import type { EventFilterOptions, FindAllRunsResult, IRunRepository, RunFilterOptions } from "./runRepository.js";
 import { getInitialSeedEvents, getInitialSeedRuns } from "./seeds.js";
 
@@ -145,7 +146,10 @@ export class InMemoryRunRepository implements IRunRepository {
       const taskIndex = run.tasks.findIndex((t) => t.id === taskId);
       if (taskIndex !== -1) {
         const task = run.tasks[taskIndex];
-        const currentVersion = task.version ?? 1;
+        if (!task) {
+          continue;
+        }
+        const currentVersion = task.version;
 
         // 1. Check terminal immutability and valid transition
         const transitionCheck = assertValidTaskTransition(task.status, update.status);
@@ -162,7 +166,7 @@ export class InMemoryRunRepository implements IRunRepository {
 
         // 3. Apply atomic update
         const newVersion = expectedVersion + 1;
-        run.tasks[taskIndex] = {
+        const updatedTask: Task = {
           ...task,
           status: update.status,
           workerId: update.workerId ?? task.workerId,
@@ -173,6 +177,7 @@ export class InMemoryRunRepository implements IRunRepository {
           output: update.output ?? task.output,
           error: update.error ?? task.error,
         };
+        run.tasks[taskIndex] = updatedTask;
         run.updatedAt = new Date().toISOString();
         return Promise.resolve(ok({ newVersion }));
       }

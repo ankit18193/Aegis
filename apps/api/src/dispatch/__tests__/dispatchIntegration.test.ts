@@ -57,6 +57,7 @@ describe("Distributed Multi-Worker Dispatch & Routing Integration (Phase 11E —
       status: "pending",
       description: `Task ${name}`,
       attemptCount: 0,
+      version: 1,
       dependencies: [],
       input: requiredTools.length > 0 ? { requiredTools } : undefined,
     };

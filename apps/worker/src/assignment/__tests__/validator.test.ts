@@ -20,6 +20,7 @@ describe("TaskAssignmentValidator (Phase 11B — Commit 2)", () => {
     status: "pending" as const,
     description: "Run compute workload",
     attemptCount: 0,
+    version: 1,
   };
 
   it("validates target worker matching", () => {

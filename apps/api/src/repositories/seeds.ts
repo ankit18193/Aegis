@@ -1,10 +1,21 @@
-import type { Run, RunEvent } from "@aegis/contracts";
+import type { Run, RunEvent, Task } from "@aegis/contracts";
 import { eventId, runId, taskId, workerId, workflowId } from "@aegis/types";
+
+function enrichTask(t: Record<string, unknown>): Task {
+  const version = typeof t["version"] === "number" ? t["version"] : 1;
+  const workerVal = t["workerId"] ?? t["worker"];
+  const targetWorkerId = typeof workerVal === "string" ? workerId(workerVal) : undefined;
+  return {
+    ...(t as unknown as Task),
+    version,
+    workerId: targetWorkerId,
+  };
+}
 
 export function getInitialSeedRuns(): Run[] {
   const baseTime = Date.now();
 
-  return [
+  const rawRuns = [
     {
       id: runId("run-001"),
       goal: "Analyze repository performance bottlenecks and optimize database queries",
@@ -328,6 +339,15 @@ export function getInitialSeedRuns(): Run[] {
       ],
     },
   ];
+
+  return rawRuns.map((run) => ({
+    ...run,
+    workflow: {
+      ...run.workflow,
+      tasks: run.workflow.tasks.map(enrichTask),
+    },
+    tasks: run.tasks.map(enrichTask),
+  })) as Run[];
 }
 
 export function getInitialSeedEvents(): Record<string, RunEvent[]> {

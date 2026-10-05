@@ -34,6 +34,7 @@ describe("TaskExecutionService", () => {
       status: "queued",
       description: "Generate summary task",
       attemptCount: 0,
+      version: 1,
       input: { prompt: "Hello world" },
     },
     assignedAt: new Date().toISOString(),

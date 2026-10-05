@@ -59,6 +59,7 @@ export type TaskStatus =
   | "running"
   | "completed"
   | "failed"
+  | "retrying"
   | "cancelled";
 
 export const TERMINAL_TASK_STATUSES: ReadonlySet<TaskStatus> = new Set([
@@ -70,7 +71,8 @@ export const TERMINAL_TASK_STATUSES: ReadonlySet<TaskStatus> = new Set([
 export const VALID_TASK_TRANSITIONS: Readonly<Record<TaskStatus, readonly TaskStatus[]>> = {
   pending: ["queued", "cancelled"],
   queued: ["running", "failed", "cancelled"],
-  running: ["completed", "failed", "cancelled"],
+  running: ["completed", "failed", "retrying", "cancelled"],
+  retrying: ["queued", "running", "failed", "cancelled"],
   completed: [],
   failed: [],
   cancelled: [],

@@ -16,6 +16,7 @@ describe("TaskDispatcher (Phase 11E — Commit 3)", () => {
       status: "pending",
       description: "Run python script",
       attemptCount: 0,
+      version: 1,
       dependencies: [],
       ...overrides,
     };

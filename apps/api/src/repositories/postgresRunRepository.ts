@@ -42,16 +42,16 @@ import type { PostgresJsDatabase } from "drizzle-orm/postgres-js";
 
 import type { DatabaseContext } from "../db/client.js";
 import {
+  runEventsTable,
+  runsTable,
+  tasksTable,
+} from "../db/schema.js";
+import {
   ConcurrencyConflictError,
   type DomainError,
   TaskNotFoundError,
 } from "../domain/errors.js";
 import { assertValidTaskTransition } from "../domain/lifecycle.js";
-import {
-  runEventsTable,
-  runsTable,
-  tasksTable,
-} from "../db/schema.js";
 
 import type {
   EventFilterOptions,
@@ -274,7 +274,7 @@ export class PostgresRunRepository implements IRunRepository {
               status: task.status,
               attemptCount: task.attemptCount,
               workerId: task.workerId ?? task.worker ?? null,
-              version: task.version ?? 1,
+              version: task.version,
               startedAt: task.startedAt ?? null,
               completedAt: task.completedAt ?? null,
               output: task.output ?? null,
@@ -289,7 +289,7 @@ export class PostgresRunRepository implements IRunRepository {
                 status: task.status,
                 attemptCount: task.attemptCount,
                 workerId: task.workerId ?? task.worker ?? null,
-                version: task.version ?? 1,
+                version: task.version,
                 startedAt: task.startedAt ?? null,
                 completedAt: task.completedAt ?? null,
                 output: task.output ?? null,
@@ -439,7 +439,7 @@ export class PostgresRunRepository implements IRunRepository {
             status: task.status,
             attemptCount: task.attemptCount,
             workerId: task.workerId ?? task.worker ?? null,
-            version: task.version ?? 1,
+            version: task.version,
             startedAt: task.startedAt ?? null,
             completedAt: task.completedAt ?? null,
             output: task.output ?? null,
@@ -528,6 +528,11 @@ export class PostgresRunRepository implements IRunRepository {
       );
     }
 
-    return ok({ newVersion: updatedRows[0].version });
+    const firstUpdated = updatedRows[0];
+    if (!firstUpdated) {
+      return err(new TaskNotFoundError(targetTaskId));
+    }
+
+    return ok({ newVersion: firstUpdated.version });
   }
 }

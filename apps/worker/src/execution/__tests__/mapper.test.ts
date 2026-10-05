@@ -29,6 +29,7 @@ describe("Worker Execution Mapper (Phase 11C — Commit 2)", () => {
       status: "pending",
       description: description ?? "Analyze database indexes",
       attemptCount: 0,
+      version: 1,
       input,
     },
     assignedAt: "2026-10-01T11:59:00.000Z",

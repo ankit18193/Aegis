@@ -78,6 +78,7 @@ describe("WorkerTaskConsumer (Phase 11B — Commit 3)", () => {
         status: "queued",
         description: "",
         attemptCount: 0,
+        version: 1,
         input: { key: "value" },
       },
       assignedAt: "2026-10-02T00:00:00.000Z",

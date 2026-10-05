@@ -33,6 +33,7 @@ describe("TaskExecutor AgentRuntime Integration (Phase 11C — Commit 2)", () =>
       status: "pending",
       description: "Compute rolling average",
       attemptCount: 0,
+      version: 1,
       input: {
         expression: "(50 * 2) + 25",
         metricName: "p99_latency",

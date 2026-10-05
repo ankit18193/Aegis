@@ -14,6 +14,7 @@ describe("DeterministicWorkerSelector (Phase 11E — Commit 2)", () => {
       status: "pending",
       description: "Sample processing task",
       attemptCount: 0,
+      version: 1,
       dependencies: [],
       ...overrides,
     };

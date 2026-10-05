@@ -90,16 +90,20 @@ export class TaskResultConsumer {
     this._messagesProcessed++;
 
     let envelope: TaskResultEnvelope;
-    if (raw && typeof raw === "object" && "type" in raw && raw.type === "task_result") {
-      envelope = raw as TaskResultEnvelope;
+    if (raw && typeof raw === "object" && !Buffer.isBuffer(raw)) {
+      envelope = raw;
     } else {
       try {
-        const str = Buffer.isBuffer(raw) ? raw.toString("utf-8") : (raw as string);
-        if (!str || str.trim().length === 0) {
+        if (!raw) {
           this.logger?.warn("Ignoring empty task result message", { topic: this.topic });
           return false;
         }
-        const json = JSON.parse(str);
+        const str = typeof raw === "string" ? raw : raw.toString("utf-8");
+        if (str.trim().length === 0) {
+          this.logger?.warn("Ignoring empty task result message", { topic: this.topic });
+          return false;
+        }
+        const json: unknown = JSON.parse(str);
         const parsed = taskResultEnvelopeSchema.safeParse(json);
         if (!parsed.success) {
           this.logger?.warn("Invalid TaskResultEnvelope schema", {
@@ -151,7 +155,7 @@ export class TaskResultConsumer {
         output: serializedOutput,
         error: error?.message,
       },
-      task.version ?? 1,
+      task.version,
     );
 
     if (!updateRes.ok) {

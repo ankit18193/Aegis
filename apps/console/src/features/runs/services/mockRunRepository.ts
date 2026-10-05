@@ -125,6 +125,7 @@ export class MockRunRepository {
             status: "pending",
             description: "Parse execution requirements, inspect target boundaries, and sequence tasks.",
             attemptCount: 0,
+            version: 1,
           },
           {
             id: taskId(`task-${newId}-2`),
@@ -132,6 +133,7 @@ export class MockRunRepository {
             status: "pending",
             description: "Generate structured task graph and configure execution parameters.",
             attemptCount: 0,
+            version: 1,
           },
           {
             id: taskId(`task-${newId}-3`),
@@ -139,6 +141,7 @@ export class MockRunRepository {
             status: "pending",
             description: "Execute assigned worker tasks and capture tool outputs.",
             attemptCount: 0,
+            version: 1,
           },
           {
             id: taskId(`task-${newId}-4`),
@@ -146,6 +149,7 @@ export class MockRunRepository {
             status: "pending",
             description: "Synthesize findings, verify assertions, and compile final output report.",
             attemptCount: 0,
+            version: 1,
           },
         ],
       },
@@ -156,6 +160,7 @@ export class MockRunRepository {
           status: "pending",
           description: "Parse execution requirements, inspect target boundaries, and sequence tasks.",
           attemptCount: 0,
+          version: 1,
         },
         {
           id: taskId(`task-${newId}-2`),
@@ -163,6 +168,7 @@ export class MockRunRepository {
           status: "pending",
           description: "Generate structured task graph and configure execution parameters.",
           attemptCount: 0,
+          version: 1,
         },
         {
           id: taskId(`task-${newId}-3`),
@@ -170,6 +176,7 @@ export class MockRunRepository {
           status: "pending",
           description: "Execute assigned worker tasks and capture tool outputs.",
           attemptCount: 0,
+          version: 1,
         },
         {
           id: taskId(`task-${newId}-4`),
@@ -177,6 +184,7 @@ export class MockRunRepository {
           status: "pending",
           description: "Synthesize findings, verify assertions, and compile final output report.",
           attemptCount: 0,
+          version: 1,
         },
       ],
     };
