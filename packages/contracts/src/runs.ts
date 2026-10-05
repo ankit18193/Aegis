@@ -88,6 +88,8 @@ export const taskSchema = z.object({
   status: taskStatusSchema,
   description: z.string().default(""),
   worker: workerIdSchema.optional(),
+  workerId: workerIdSchema.optional(),
+  version: z.number().int().min(1).default(1),
   startedAt: z.string().optional(),
   completedAt: z.string().optional(),
   attemptCount: z.number().int().min(0).default(0),
@@ -97,6 +99,16 @@ export const taskSchema = z.object({
   dependencies: z.array(taskIdSchema).optional(),
 });
 export type Task = z.infer<typeof taskSchema>;
+
+export const taskStateUpdateSchema = z.object({
+  status: taskStatusSchema,
+  workerId: workerIdSchema.optional(),
+  startedAt: z.string().optional(),
+  completedAt: z.string().optional(),
+  output: z.string().optional(),
+  error: z.string().optional(),
+});
+export type TaskStateUpdate = z.infer<typeof taskStateUpdateSchema>;
 
 export const workflowSchema = z.object({
   id: workflowIdSchema,

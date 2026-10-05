@@ -9,6 +9,7 @@ import {
   runSummarySchema,
   taskSchema,
   taskStatusSchema,
+  taskStateUpdateSchema,
   VALID_RUN_TRANSITIONS,
   VALID_TASK_TRANSITIONS,
   workflowSchema,
@@ -237,6 +238,69 @@ describe("Runs & Tasks Contract Schemas", () => {
       expect(summary.id).toBe("run-001");
       expect(summary.totalTasks).toBe(5);
       expect(summary.completedTasks).toBe(5);
+    });
+  });
+
+  describe("taskSchema Durable Execution Fields (Phase 12A)", () => {
+    it("defaults version to 1 and allows explicit version", () => {
+      const defaultTask = taskSchema.parse({
+        id: "task-1",
+        name: "Index files",
+        status: "pending",
+      });
+      expect(defaultTask.version).toBe(1);
+
+      const explicitTask = taskSchema.parse({
+        id: "task-2",
+        name: "Compile assets",
+        status: "running",
+        version: 5,
+        workerId: "worker-node-1",
+      });
+      expect(explicitTask.version).toBe(5);
+      expect(explicitTask.workerId).toBe("worker-node-1");
+    });
+
+    it("rejects non-positive version values", () => {
+      expect(() =>
+        taskSchema.parse({
+          id: "task-bad",
+          name: "Bad version",
+          status: "pending",
+          version: 0,
+        }),
+      ).toThrow();
+    });
+  });
+
+  describe("taskStateUpdateSchema", () => {
+    it("validates valid task state update payloads", () => {
+      const update = taskStateUpdateSchema.parse({
+        status: "running",
+        workerId: "worker-01",
+        startedAt: "2026-10-05T12:00:00.000Z",
+      });
+      expect(update.status).toBe("running");
+      expect(update.workerId).toBe("worker-01");
+      expect(update.startedAt).toBe("2026-10-05T12:00:00.000Z");
+    });
+
+    it("accepts terminal completion with output", () => {
+      const update = taskStateUpdateSchema.parse({
+        status: "completed",
+        completedAt: "2026-10-05T12:05:00.000Z",
+        output: JSON.stringify({ success: true, count: 42 }),
+      });
+      expect(update.status).toBe("completed");
+      expect(update.output).toBeDefined();
+    });
+
+    it("rejects invalid status in state update", () => {
+      expect(() =>
+        taskStateUpdateSchema.parse({
+          status: "non_existent_status",
+        }),
+      ).toThrow();
     });
   });
 });
