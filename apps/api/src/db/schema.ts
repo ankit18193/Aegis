@@ -4,7 +4,7 @@
  * query indexes, and typed constraints mapped from canonical contracts.
  */
 
-import type { RunResult } from "@aegis/contracts";
+import type { EventEnvelope, RunResult } from "@aegis/contracts";
 import { relations } from "drizzle-orm";
 import {
   index,
@@ -125,3 +125,34 @@ export type InsertTaskRecord = typeof tasksTable.$inferInsert;
 
 export type RunEventRecord = typeof runEventsTable.$inferSelect;
 export type InsertRunEventRecord = typeof runEventsTable.$inferInsert;
+
+/**
+ * Outbox Events Table — Phase 12C: Transactional Outbox Pattern
+ * Persists domain and run events transactionally with task mutations for
+ * durable, at-least-once publication to Kafka.
+ */
+export const outboxEventsTable = pgTable(
+  "outbox_events",
+  {
+    id: text("id").primaryKey(),
+    aggregateId: text("aggregate_id").notNull(),
+    aggregateType: text("aggregate_type").notNull(),
+    eventType: text("event_type").notNull(),
+    payload: jsonb("payload").$type<EventEnvelope>().notNull(),
+    status: text("status").notNull().default("pending"),
+    attemptCount: integer("attempt_count").notNull().default(0),
+    lockedUntil: timestamp("locked_until", { withTimezone: true, mode: "string" }),
+    lockedBy: text("locked_by"),
+    publishedAt: timestamp("published_at", { withTimezone: true, mode: "string" }),
+    lastError: text("last_error"),
+    createdAt: timestamp("created_at", { withTimezone: true, mode: "string" }).notNull(),
+  },
+  (table) => [
+    index("outbox_status_created_at_idx").on(table.status, table.createdAt),
+    index("outbox_status_locked_until_idx").on(table.status, table.lockedUntil),
+    index("outbox_aggregate_idx").on(table.aggregateType, table.aggregateId),
+  ],
+);
+
+export type OutboxEventRecord = typeof outboxEventsTable.$inferSelect;
+export type InsertOutboxEventRecord = typeof outboxEventsTable.$inferInsert;

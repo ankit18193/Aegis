@@ -62,7 +62,7 @@ export const createOutboxRecordSchema = z.object({
   attemptCount: z.number().int().min(0).default(0),
   createdAt: z.string().optional(),
 });
-export type CreateOutboxRecord = z.infer<typeof createOutboxRecordSchema>;
+export type CreateOutboxRecord = z.input<typeof createOutboxRecordSchema>;
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Outbox Claiming & Configuration Schemas
