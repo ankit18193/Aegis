@@ -17,6 +17,7 @@ import { outboxEventId } from "@aegis/types";
 import { z } from "zod";
 
 import { eventEnvelopeSchema } from "./events.js";
+import { taskAssignmentEnvelopeSchema } from "./taskAssignment.js";
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Outbox Status & Nominal Branded Types
@@ -32,6 +33,13 @@ export type OutboxStatus = z.infer<typeof outboxStatusSchema>;
 
 export const outboxEventIdSchema = z.string().min(1).transform((v) => outboxEventId(v));
 
+export const outboxPayloadSchema = z.union([
+  eventEnvelopeSchema,
+  taskAssignmentEnvelopeSchema,
+  z.record(z.unknown()),
+]);
+export type OutboxPayload = z.infer<typeof outboxPayloadSchema>;
+
 // ─────────────────────────────────────────────────────────────────────────────
 // Outbox Record Schemas
 // ─────────────────────────────────────────────────────────────────────────────
@@ -41,6 +49,7 @@ export const outboxRecordSchema = z.object({
   aggregateId: z.string().min(1),
   aggregateType: z.string().min(1),
   eventType: z.string().min(1),
+  topic: z.string().min(1).nullable().optional(),
   payload: eventEnvelopeSchema,
   status: outboxStatusSchema,
   attemptCount: z.number().int().min(0).default(0),
@@ -50,19 +59,39 @@ export const outboxRecordSchema = z.object({
   lastError: z.string().nullable().optional(),
   createdAt: z.string(),
 });
-export type OutboxRecord = z.infer<typeof outboxRecordSchema>;
+
+export interface GenericEnvelope<TData = unknown> {
+  readonly id: string;
+  readonly type: string;
+  readonly source: string;
+  readonly specVersion: string;
+  readonly time: string;
+  readonly aggregateId: string;
+  readonly aggregateType: string;
+  readonly correlationId: string;
+  readonly causationId?: string | undefined;
+  readonly data: TData;
+}
+
+export type OutboxRecord<TData = unknown> = Omit<z.infer<typeof outboxRecordSchema>, "payload"> & {
+  readonly payload: GenericEnvelope<TData>;
+};
 
 export const createOutboxRecordSchema = z.object({
   id: outboxEventIdSchema.optional(),
   aggregateId: z.string().min(1),
   aggregateType: z.string().min(1),
   eventType: z.string().min(1),
-  payload: eventEnvelopeSchema,
+  topic: z.string().min(1).nullable().optional(),
+  payload: outboxPayloadSchema,
   status: outboxStatusSchema.default("pending"),
   attemptCount: z.number().int().min(0).default(0),
   createdAt: z.string().optional(),
 });
-export type CreateOutboxRecord = z.input<typeof createOutboxRecordSchema>;
+
+export type CreateOutboxRecord<TData = unknown> = Omit<z.input<typeof createOutboxRecordSchema>, "payload"> & {
+  readonly payload: GenericEnvelope<TData>;
+};
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Outbox Claiming & Configuration Schemas

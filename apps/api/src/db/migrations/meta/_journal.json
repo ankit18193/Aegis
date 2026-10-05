@@ -29,6 +29,13 @@
       "when": 1791210000000,
       "tag": "0003_outbox_events",
       "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "7",
+      "when": 1791220000000,
+      "tag": "0004_outbox_topic",
+      "breakpoints": true
     }
   ]
 }

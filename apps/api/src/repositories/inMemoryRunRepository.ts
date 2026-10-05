@@ -1,5 +1,7 @@
 import type {
+  CreateOutboxRecord,
   OutboxRecord,
+  RecoveryError,
   Run,
   RunEvent,
   RunSummary,
@@ -11,7 +13,9 @@ import {
   LeaseError,
   LeaseExpiredError,
   LeaseOwnershipConflictError,
+  RecoveryConflictError,
   StaleLeaseError,
+  TaskNotRecoverableError,
 } from "@aegis/contracts";
 import type { LeaseId, Result, RunId, TaskId, WorkerId } from "@aegis/types";
 import { err, leaseId, ok, outboxEventId } from "@aegis/types";
@@ -21,7 +25,14 @@ import { assertValidTaskTransition } from "../domain/lifecycle.js";
 import { toEventEnvelope } from "../events/envelope.js";
 
 import type { IOutboxRepository } from "./outboxRepository.js";
-import type { EventFilterOptions, FindAllRunsResult, IRunRepository, RunFilterOptions } from "./runRepository.js";
+import type {
+  EventFilterOptions,
+  FailExhaustedTaskParams,
+  FindAllRunsResult,
+  IRunRepository,
+  ReassignTaskParams,
+  RunFilterOptions,
+} from "./runRepository.js";
 import { getInitialSeedEvents, getInitialSeedRuns } from "./seeds.js";
 
 export class InMemoryRunRepository implements IRunRepository {
@@ -542,5 +553,174 @@ export class InMemoryRunRepository implements IRunRepository {
 
   getOutboxEvents(): OutboxRecord[] {
     return structuredClone(this.outboxEvents);
+  }
+
+  findOrphanedTasks(limit = 50): Promise<Task[]> {
+    const candidates: Task[] = [];
+
+    for (const run of this.runs.values()) {
+      for (const task of run.tasks) {
+        if (task.status === "running" && task.leaseExpiredAt) {
+          const candidate = structuredClone(task);
+          candidate.runId = run.id;
+          candidates.push(candidate);
+        }
+      }
+    }
+
+    candidates.sort((a, b) => (a.leaseExpiredAt ?? "").localeCompare(b.leaseExpiredAt ?? ""));
+    return Promise.resolve(candidates.slice(0, limit));
+  }
+
+  reassignTask(
+    params: ReassignTaskParams,
+    outboxRecords?: readonly CreateOutboxRecord[],
+  ): Promise<Result<Task, RecoveryError>> {
+    const { taskId, expectedVersion, newWorkerId, newLeaseId, leaseDurationMs, event } = params;
+    const now = new Date();
+    const nowIso = now.toISOString();
+    const newLeaseUntilIso = new Date(now.getTime() + leaseDurationMs).toISOString();
+
+    for (const run of this.runs.values()) {
+      const taskIndex = run.tasks.findIndex((t) => t.id === taskId);
+      if (taskIndex !== -1) {
+        const task = run.tasks[taskIndex];
+        if (!task) continue;
+
+        if (task.status !== "running" || !task.leaseExpiredAt) {
+          return Promise.resolve(
+            err(
+              new TaskNotRecoverableError(
+                taskId,
+                `Task is in state '${task.status}' and leaseExpiredAt is ${String(task.leaseExpiredAt)}`,
+              ),
+            ),
+          );
+        }
+
+        if (task.version !== expectedVersion) {
+          return Promise.resolve(
+            err(new RecoveryConflictError(taskId, expectedVersion, task.version)),
+          );
+        }
+
+        task.worker = newWorkerId;
+        task.workerId = newWorkerId;
+        task.leaseId = leaseId(newLeaseId);
+        task.leaseUntil = newLeaseUntilIso;
+        task.leaseExpiredAt = undefined;
+        task.attemptCount += 1;
+        task.version = expectedVersion + 1;
+        run.updatedAt = nowIso;
+
+        if (event) {
+          const list = this.events.get(event.runId) ?? [];
+          list.push(structuredClone(event));
+          this.events.set(event.runId, list);
+        }
+
+        if (outboxRecords && outboxRecords.length > 0) {
+          for (const r of outboxRecords) {
+            const rec: OutboxRecord = {
+              id: r.id ? outboxEventId(r.id) : outboxEventId(r.payload.id || crypto.randomUUID()),
+              aggregateId: r.aggregateId,
+              aggregateType: r.aggregateType,
+              eventType: r.eventType,
+              topic: r.topic ?? undefined,
+              payload: r.payload,
+              status: r.status ?? "pending",
+              attemptCount: r.attemptCount ?? 0,
+              createdAt: r.createdAt ?? nowIso,
+            };
+            this.outboxEvents.push(rec);
+          }
+          if (this.outboxRepo) {
+            void this.outboxRepo.insert(outboxRecords);
+          }
+        }
+
+        const cloned = structuredClone(task);
+        cloned.runId = run.id;
+        return Promise.resolve(ok(cloned));
+      }
+    }
+
+    return Promise.resolve(
+      err(new TaskNotRecoverableError(taskId, "Task does not exist")),
+    );
+  }
+
+  failExhaustedTask(
+    params: FailExhaustedTaskParams,
+    outboxRecords?: readonly CreateOutboxRecord[],
+  ): Promise<Result<Task, RecoveryError>> {
+    const { taskId, expectedVersion, reason, event } = params;
+    const now = new Date();
+    const nowIso = now.toISOString();
+
+    for (const run of this.runs.values()) {
+      const taskIndex = run.tasks.findIndex((t) => t.id === taskId);
+      if (taskIndex !== -1) {
+        const task = run.tasks[taskIndex];
+        if (!task) continue;
+
+        if (task.status !== "running" || !task.leaseExpiredAt) {
+          return Promise.resolve(
+            err(
+              new TaskNotRecoverableError(
+                taskId,
+                `Task is in state '${task.status}' and leaseExpiredAt is ${String(task.leaseExpiredAt)}`,
+              ),
+            ),
+          );
+        }
+
+        if (task.version !== expectedVersion) {
+          return Promise.resolve(
+            err(new RecoveryConflictError(taskId, expectedVersion, task.version)),
+          );
+        }
+
+        task.status = "failed";
+        task.error = reason;
+        task.completedAt = nowIso;
+        task.version = expectedVersion + 1;
+        run.updatedAt = nowIso;
+
+        if (event) {
+          const list = this.events.get(event.runId) ?? [];
+          list.push(structuredClone(event));
+          this.events.set(event.runId, list);
+        }
+
+        if (outboxRecords && outboxRecords.length > 0) {
+          for (const r of outboxRecords) {
+            const rec: OutboxRecord = {
+              id: r.id ? outboxEventId(r.id) : outboxEventId(r.payload.id || crypto.randomUUID()),
+              aggregateId: r.aggregateId,
+              aggregateType: r.aggregateType,
+              eventType: r.eventType,
+              topic: r.topic ?? undefined,
+              payload: r.payload,
+              status: r.status ?? "pending",
+              attemptCount: r.attemptCount ?? 0,
+              createdAt: r.createdAt ?? nowIso,
+            };
+            this.outboxEvents.push(rec);
+          }
+          if (this.outboxRepo) {
+            void this.outboxRepo.insert(outboxRecords);
+          }
+        }
+
+        const cloned = structuredClone(task);
+        cloned.runId = run.id;
+        return Promise.resolve(ok(cloned));
+      }
+    }
+
+    return Promise.resolve(
+      err(new TaskNotRecoverableError(taskId, "Task does not exist")),
+    );
   }
 }

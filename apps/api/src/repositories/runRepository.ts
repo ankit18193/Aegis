@@ -1,7 +1,9 @@
 import type {
+  CreateOutboxRecord,
   EventSeverity,
   EventType,
   LeaseError,
+  RecoveryError,
   Run,
   RunEvent,
   RunStatus,
@@ -32,6 +34,22 @@ export interface FindAllRunsResult {
   items: RunSummary[];
   totalCount: number;
   hasMore?: boolean;
+}
+
+export interface ReassignTaskParams {
+  readonly taskId: TaskId;
+  readonly expectedVersion: number;
+  readonly newWorkerId: WorkerId;
+  readonly newLeaseId: string;
+  readonly leaseDurationMs: number;
+  readonly event?: RunEvent | undefined;
+}
+
+export interface FailExhaustedTaskParams {
+  readonly taskId: TaskId;
+  readonly expectedVersion: number;
+  readonly reason: string;
+  readonly event?: RunEvent | undefined;
 }
 
 export interface IRunRepository {
@@ -106,5 +124,31 @@ export interface IRunRepository {
     expiredAt: Date,
     event?: RunEvent,
   ): Promise<boolean>;
+
+  /**
+   * Queries tasks with genuinely expired leases (Lock 2: status = 'running' AND lease_expired_at IS NOT NULL),
+   * ordered by lease_expired_at ascending.
+   */
+  findOrphanedTasks(limit?: number): Promise<Task[]>;
+
+  /**
+   * Atomically reassigns an orphaned task to a new worker with a new lease and incremented attemptCount.
+   * Guarded by expectedVersion, status = 'running', and lease_expired_at IS NOT NULL (Lock 2, 3, 4, 5).
+   * Atomically inserts run event and outbox records in the same transaction (Lock 8).
+   */
+  reassignTask(
+    params: ReassignTaskParams,
+    outboxRecords?: readonly CreateOutboxRecord[],
+  ): Promise<Result<Task, RecoveryError>>;
+
+  /**
+   * Atomically transitions an orphaned task to 'failed' status when max retry attempts are exhausted.
+   * Guarded by expectedVersion, status = 'running', and lease_expired_at IS NOT NULL (Lock 2, 3, 6).
+   * Atomically inserts run event and outbox records in the same transaction (Lock 8).
+   */
+  failExhaustedTask(
+    params: FailExhaustedTaskParams,
+    outboxRecords?: readonly CreateOutboxRecord[],
+  ): Promise<Result<Task, RecoveryError>>;
 }
 

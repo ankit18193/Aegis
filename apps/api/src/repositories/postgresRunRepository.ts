@@ -6,8 +6,10 @@
  */
 
 import type {
+  CreateOutboxRecord,
   EventSeverity,
   EventType,
+  RecoveryError,
   Run,
   RunEvent,
   RunStatus,
@@ -21,7 +23,9 @@ import {
   LeaseError,
   LeaseExpiredError,
   LeaseOwnershipConflictError,
+  RecoveryConflictError,
   StaleLeaseError,
+  TaskNotRecoverableError,
 } from "@aegis/contracts";
 import {
   err,
@@ -67,8 +71,10 @@ import { toEventEnvelope } from "../events/envelope.js";
 
 import type {
   EventFilterOptions,
+  FailExhaustedTaskParams,
   FindAllRunsResult,
   IRunRepository,
+  ReassignTaskParams,
   RunFilterOptions,
 } from "./runRepository.js";
 import { getInitialSeedEvents, getInitialSeedRuns } from "./seeds.js";
@@ -1005,6 +1011,249 @@ export class PostgresRunRepository implements IRunRepository {
       }
 
       return true;
+    });
+  }
+
+  async findOrphanedTasks(limit = 50): Promise<Task[]> {
+    const rows = await this.db
+      .select()
+      .from(tasksTable)
+      .where(
+        and(
+          eq(tasksTable.status, "running"),
+          sql`${tasksTable.leaseExpiredAt} IS NOT NULL`,
+        ),
+      )
+      .orderBy(asc(tasksTable.leaseExpiredAt))
+      .limit(limit);
+
+    return rows.map(mapTaskRowToTask);
+  }
+
+  async reassignTask(
+    params: ReassignTaskParams,
+    outboxRecords?: readonly CreateOutboxRecord[],
+  ): Promise<Result<Task, RecoveryError>> {
+    const { taskId, expectedVersion, newWorkerId, newLeaseId, leaseDurationMs, event } = params;
+    const now = new Date();
+    const nowIso = now.toISOString();
+    const newLeaseUntilIso = new Date(now.getTime() + leaseDurationMs).toISOString();
+
+    return await this.db.transaction(async (tx) => {
+      const updatedRows = await tx
+        .update(tasksTable)
+        .set({
+          workerId: newWorkerId,
+          leaseId: newLeaseId,
+          leaseUntil: newLeaseUntilIso,
+          leaseExpiredAt: null,
+          attemptCount: sql`${tasksTable.attemptCount} + 1`,
+          version: expectedVersion + 1,
+        })
+        .where(
+          and(
+            eq(tasksTable.id, taskId),
+            eq(tasksTable.version, expectedVersion),
+            eq(tasksTable.status, "running"),
+            sql`${tasksTable.leaseExpiredAt} IS NOT NULL`,
+          ),
+        )
+        .returning();
+
+      if (updatedRows.length === 0) {
+        const [current] = await tx
+          .select({
+            version: tasksTable.version,
+            status: tasksTable.status,
+            leaseExpiredAt: tasksTable.leaseExpiredAt,
+          })
+          .from(tasksTable)
+          .where(eq(tasksTable.id, taskId));
+
+        if (!current) {
+          return err(new TaskNotRecoverableError(taskId, "Task does not exist"));
+        }
+        if (current.status !== "running" || !current.leaseExpiredAt) {
+          return err(
+            new TaskNotRecoverableError(
+              taskId,
+              `Task is in state '${current.status}' and leaseExpiredAt is ${String(current.leaseExpiredAt)}`,
+            ),
+          );
+        }
+        return err(new RecoveryConflictError(taskId, expectedVersion, current.version));
+      }
+
+      const firstRow = updatedRows[0];
+      if (!firstRow) {
+        return err(new TaskNotRecoverableError(taskId, "Failed to retrieve updated task record"));
+      }
+      const updatedTask = mapTaskRowToTask(firstRow);
+
+      if (event) {
+        await tx
+          .insert(runEventsTable)
+          .values({
+            id: event.id,
+            runId: event.runId,
+            type: event.type,
+            severity: event.severity,
+            timestamp: event.timestamp,
+            message: event.message,
+            taskId: event.taskId ?? null,
+            taskName: event.taskName ?? null,
+            metadata: event.metadata ?? null,
+          })
+          .onConflictDoUpdate({
+            target: runEventsTable.id,
+            set: {
+              type: event.type,
+              severity: event.severity,
+              timestamp: event.timestamp,
+              message: event.message,
+              taskId: event.taskId ?? null,
+              taskName: event.taskName ?? null,
+              metadata: event.metadata ?? null,
+            },
+          });
+      }
+
+      if (outboxRecords && outboxRecords.length > 0) {
+        const rows = outboxRecords.map((r) => ({
+          id: r.id ?? (r.payload.id || crypto.randomUUID()),
+          aggregateId: r.aggregateId,
+          aggregateType: r.aggregateType,
+          eventType: r.eventType,
+          topic: r.topic ?? null,
+          payload: r.payload,
+          status: r.status ?? "pending",
+          attemptCount: r.attemptCount ?? 0,
+          createdAt: r.createdAt ?? nowIso,
+          lockedUntil: null,
+          lockedBy: null,
+          publishedAt: null,
+          lastError: null,
+        }));
+
+        await tx
+          .insert(outboxEventsTable)
+          .values(rows)
+          .onConflictDoNothing({ target: outboxEventsTable.id });
+      }
+
+      return ok(updatedTask);
+    });
+  }
+
+  async failExhaustedTask(
+    params: FailExhaustedTaskParams,
+    outboxRecords?: readonly CreateOutboxRecord[],
+  ): Promise<Result<Task, RecoveryError>> {
+    const { taskId, expectedVersion, reason, event } = params;
+    const now = new Date();
+    const nowIso = now.toISOString();
+
+    return await this.db.transaction(async (tx) => {
+      const updatedRows = await tx
+        .update(tasksTable)
+        .set({
+          status: "failed",
+          error: reason,
+          completedAt: nowIso,
+          version: expectedVersion + 1,
+        })
+        .where(
+          and(
+            eq(tasksTable.id, taskId),
+            eq(tasksTable.version, expectedVersion),
+            eq(tasksTable.status, "running"),
+            sql`${tasksTable.leaseExpiredAt} IS NOT NULL`,
+          ),
+        )
+        .returning();
+
+      if (updatedRows.length === 0) {
+        const [current] = await tx
+          .select({
+            version: tasksTable.version,
+            status: tasksTable.status,
+            leaseExpiredAt: tasksTable.leaseExpiredAt,
+          })
+          .from(tasksTable)
+          .where(eq(tasksTable.id, taskId));
+
+        if (!current) {
+          return err(new TaskNotRecoverableError(taskId, "Task does not exist"));
+        }
+        if (current.status !== "running" || !current.leaseExpiredAt) {
+          return err(
+            new TaskNotRecoverableError(
+              taskId,
+              `Task is in state '${current.status}' and leaseExpiredAt is ${String(current.leaseExpiredAt)}`,
+            ),
+          );
+        }
+        return err(new RecoveryConflictError(taskId, expectedVersion, current.version));
+      }
+
+      const firstRow = updatedRows[0];
+      if (!firstRow) {
+        return err(new TaskNotRecoverableError(taskId, "Failed to retrieve updated task record"));
+      }
+      const updatedTask = mapTaskRowToTask(firstRow);
+
+      if (event) {
+        await tx
+          .insert(runEventsTable)
+          .values({
+            id: event.id,
+            runId: event.runId,
+            type: event.type,
+            severity: event.severity,
+            timestamp: event.timestamp,
+            message: event.message,
+            taskId: event.taskId ?? null,
+            taskName: event.taskName ?? null,
+            metadata: event.metadata ?? null,
+          })
+          .onConflictDoUpdate({
+            target: runEventsTable.id,
+            set: {
+              type: event.type,
+              severity: event.severity,
+              timestamp: event.timestamp,
+              message: event.message,
+              taskId: event.taskId ?? null,
+              taskName: event.taskName ?? null,
+              metadata: event.metadata ?? null,
+            },
+          });
+      }
+
+      if (outboxRecords && outboxRecords.length > 0) {
+        const rows = outboxRecords.map((r) => ({
+          id: r.id ?? (r.payload.id || crypto.randomUUID()),
+          aggregateId: r.aggregateId,
+          aggregateType: r.aggregateType,
+          eventType: r.eventType,
+          topic: r.topic ?? null,
+          payload: r.payload,
+          status: r.status ?? "pending",
+          attemptCount: r.attemptCount ?? 0,
+          createdAt: r.createdAt ?? nowIso,
+          lockedUntil: null,
+          lockedBy: null,
+          publishedAt: null,
+          lastError: null,
+        }));
+
+        await tx
+          .insert(outboxEventsTable)
+          .values(rows)
+          .onConflictDoNothing({ target: outboxEventsTable.id });
+      }
+
+      return ok(updatedTask);
     });
   }
 }

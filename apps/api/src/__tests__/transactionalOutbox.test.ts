@@ -214,7 +214,7 @@ describe("Phase 12C: Transactional Outbox Durability Verification", () => {
     if (!firstEvent) return;
 
     expect(outboxRecord.payload.id).toBe(firstEvent.id);
-    expect(outboxRecord.payload.data.message).toBe(firstEvent.message);
+    expect((outboxRecord.payload as EventEnvelope).data.message).toBe(firstEvent.message);
     expect(outboxRecord.status).toBe("publishing");
   });
 

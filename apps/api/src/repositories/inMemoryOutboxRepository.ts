@@ -28,6 +28,7 @@ export class InMemoryOutboxRepository implements IOutboxRepository {
         aggregateId: r.aggregateId,
         aggregateType: r.aggregateType,
         eventType: r.eventType,
+        topic: r.topic ?? undefined,
         payload: r.payload,
         status: r.status ?? "pending",
         attemptCount: r.attemptCount ?? 0,

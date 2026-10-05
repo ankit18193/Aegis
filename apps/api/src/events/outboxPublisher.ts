@@ -179,7 +179,7 @@ export class OutboxPublisher {
       return { claimedCount: 0, publishedCount: 0, failedCount: 0 };
     }
 
-    const envelopes: EventEnvelope[] = claimedRecords.map((r) => r.payload);
+    const envelopes: EventEnvelope[] = claimedRecords.map((r) => r.payload as EventEnvelope);
 
     let publishResult;
     try {

@@ -4,7 +4,7 @@
  * query indexes, and typed constraints mapped from canonical contracts.
  */
 
-import type { EventEnvelope, RunResult } from "@aegis/contracts";
+import type { GenericEnvelope, RunResult } from "@aegis/contracts";
 import { relations } from "drizzle-orm";
 import {
   index,
@@ -68,6 +68,7 @@ export const tasksTable = pgTable(
     index("tasks_run_id_status_idx").on(table.runId, table.status),
     index("tasks_worker_id_idx").on(table.workerId),
     index("tasks_lease_until_idx").on(table.status, table.leaseUntil),
+    index("tasks_orphan_recovery_idx").on(table.status, table.leaseExpiredAt),
   ],
 );
 
@@ -138,7 +139,8 @@ export const outboxEventsTable = pgTable(
     aggregateId: text("aggregate_id").notNull(),
     aggregateType: text("aggregate_type").notNull(),
     eventType: text("event_type").notNull(),
-    payload: jsonb("payload").$type<EventEnvelope>().notNull(),
+    topic: text("topic"),
+    payload: jsonb("payload").$type<GenericEnvelope>().notNull(),
     status: text("status").notNull().default("pending"),
     attemptCount: integer("attempt_count").notNull().default(0),
     lockedUntil: timestamp("locked_until", { withTimezone: true, mode: "string" }),
