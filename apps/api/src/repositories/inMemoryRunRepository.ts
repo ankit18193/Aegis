@@ -1,6 +1,9 @@
-import type { Run, RunEvent, RunSummary } from "@aegis/contracts";
-import type { RunId } from "@aegis/types";
+import type { Run, RunEvent, RunSummary, TaskStateUpdate } from "@aegis/contracts";
+import type { Result, RunId, TaskId } from "@aegis/types";
+import { err, ok } from "@aegis/types";
 
+import { ConcurrencyConflictError, TaskNotFoundError } from "../domain/errors.js";
+import { assertValidTaskTransition } from "../domain/lifecycle.js";
 import type { EventFilterOptions, FindAllRunsResult, IRunRepository, RunFilterOptions } from "./runRepository.js";
 import { getInitialSeedEvents, getInitialSeedRuns } from "./seeds.js";
 
@@ -131,5 +134,50 @@ export class InMemoryRunRepository implements IRunRepository {
   resetToDefaults(): Promise<void> {
     this.populateSeeds();
     return Promise.resolve();
+  }
+
+  updateTaskState(
+    taskId: TaskId,
+    update: TaskStateUpdate,
+    expectedVersion: number,
+  ): Promise<Result<{ readonly newVersion: number }, ConcurrencyConflictError | DomainError>> {
+    for (const run of this.runs.values()) {
+      const taskIndex = run.tasks.findIndex((t) => t.id === taskId);
+      if (taskIndex !== -1) {
+        const task = run.tasks[taskIndex];
+        const currentVersion = task.version ?? 1;
+
+        // 1. Check terminal immutability and valid transition
+        const transitionCheck = assertValidTaskTransition(task.status, update.status);
+        if (!transitionCheck.ok) {
+          return Promise.resolve(transitionCheck);
+        }
+
+        // 2. Check optimistic locking
+        if (currentVersion !== expectedVersion) {
+          return Promise.resolve(
+            err(new ConcurrencyConflictError(taskId, expectedVersion, currentVersion)),
+          );
+        }
+
+        // 3. Apply atomic update
+        const newVersion = expectedVersion + 1;
+        run.tasks[taskIndex] = {
+          ...task,
+          status: update.status,
+          workerId: update.workerId ?? task.workerId,
+          worker: update.workerId ?? task.worker,
+          version: newVersion,
+          startedAt: update.startedAt ?? task.startedAt,
+          completedAt: update.completedAt ?? task.completedAt,
+          output: update.output ?? task.output,
+          error: update.error ?? task.error,
+        };
+        run.updatedAt = new Date().toISOString();
+        return Promise.resolve(ok({ newVersion }));
+      }
+    }
+
+    return Promise.resolve(err(new TaskNotFoundError(taskId)));
   }
 }

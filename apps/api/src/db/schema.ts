@@ -52,6 +52,8 @@ export const tasksTable = pgTable(
     description: text("description").notNull().default(""),
     status: text("status").notNull(),
     attemptCount: integer("attempt_count").notNull().default(0),
+    workerId: text("worker_id"),
+    version: integer("version").notNull().default(1),
     startedAt: timestamp("started_at", { withTimezone: true, mode: "string" }),
     completedAt: timestamp("completed_at", { withTimezone: true, mode: "string" }),
     output: text("output"),
@@ -60,6 +62,8 @@ export const tasksTable = pgTable(
   },
   (table) => [
     index("tasks_run_id_idx").on(table.runId),
+    index("tasks_run_id_status_idx").on(table.runId, table.status),
+    index("tasks_worker_id_idx").on(table.workerId),
   ],
 );
 

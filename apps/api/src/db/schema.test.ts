@@ -20,4 +20,11 @@ describe("Database Schema Definitions", () => {
     expect(tasksTable.runId).toBeDefined();
     expect(runEventsTable.runId).toBeDefined();
   });
+
+  it("defines durable execution columns on tasksTable (Phase 12A)", () => {
+    expect(tasksTable.version).toBeDefined();
+    expect(tasksTable.workerId).toBeDefined();
+    expect(tasksTable.status).toBeDefined();
+    expect(tasksTable.attemptCount).toBeDefined();
+  });
 });

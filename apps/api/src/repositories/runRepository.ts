@@ -5,8 +5,11 @@ import type {
   RunEvent,
   RunStatus,
   RunSummary,
+  TaskStateUpdate,
 } from "@aegis/contracts";
-import type { RunId } from "@aegis/types";
+import type { Result, RunId, TaskId } from "@aegis/types";
+
+import type { ConcurrencyConflictError, DomainError } from "../domain/errors.js";
 
 export interface RunFilterOptions {
   status?: RunStatus | undefined;
@@ -39,4 +42,14 @@ export interface IRunRepository {
   findEvents(runId: RunId, options?: EventFilterOptions): Promise<RunEvent[]>;
   saveEvent(event: RunEvent): Promise<void>;
   resetToDefaults(): Promise<void>;
+
+  /**
+   * Atomically updates a task's durable execution state with optimistic concurrency control.
+   * Returns a typed error if the task is not found, in a terminal state, or has a version conflict.
+   */
+  updateTaskState(
+    taskId: TaskId,
+    update: TaskStateUpdate,
+    expectedVersion: number,
+  ): Promise<Result<{ readonly newVersion: number }, ConcurrencyConflictError | DomainError>>;
 }

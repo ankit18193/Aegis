@@ -8,11 +8,12 @@
 import * as net from "node:net";
 
 import type { Run, RunEvent } from "@aegis/contracts";
-import { eventId, runId, taskId, workflowId } from "@aegis/types";
+import { eventId, runId, taskId, workerId, workflowId } from "@aegis/types";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 
 import { createDatabaseContext, type DatabaseContext } from "../db/client.js";
 import { runMigrations } from "../db/migrator.js";
+import { ConcurrencyConflictError, TerminalStateError } from "../domain/errors.js";
 
 import { PostgresRunRepository } from "./postgresRunRepository.js";
 
@@ -365,6 +366,73 @@ describe.runIf(dbAvailable)("PostgresRunRepository Integration Tests (Real Postg
         actionName: "calculate",
         result: 42,
       });
+    });
+  });
+
+  describe("updateTaskState with Real PostgreSQL & Optimistic Concurrency (Phase 12A)", () => {
+    it("atomically updates task in PostgreSQL and increments version", async () => {
+      // task-104 is seeded as queued, version 1
+      const updateRes = await repository.updateTaskState(
+        taskId("task-104"),
+        {
+          status: "running",
+          workerId: workerId("worker-pg-node-1"),
+          startedAt: "2026-10-05T12:00:00.000Z",
+        },
+        1,
+      );
+
+      expect(updateRes.ok).toBe(true);
+      if (updateRes.ok) {
+        expect(updateRes.value.newVersion).toBe(2);
+      }
+
+      // Verify row in real PostgreSQL
+      const run = await repository.findById(runId("run-001"));
+      const task = run?.tasks.find((t) => t.id === "task-104");
+      expect(task).toBeDefined();
+      expect(task?.status).toBe("running");
+      expect(task?.workerId).toBe("worker-pg-node-1");
+      expect(task?.version).toBe(2);
+      expect(task?.startedAt).toBe("2026-10-05T12:00:00.000Z");
+    });
+
+    it("rejects concurrent update with mismatched version in real PostgreSQL", async () => {
+      // Current version is 1, caller supplies version 99
+      const res = await repository.updateTaskState(
+        taskId("task-104"),
+        { status: "running" },
+        99,
+      );
+
+      expect(res.ok).toBe(false);
+      if (!res.ok) {
+        expect(res.error).toBeInstanceOf(ConcurrencyConflictError);
+        expect(res.error.code).toBe("CONCURRENCY_CONFLICT");
+      }
+    });
+
+    it("enforces terminal state immutability in real PostgreSQL", async () => {
+      // Advance to completed
+      await repository.updateTaskState(taskId("task-104"), { status: "running" }, 1);
+      const completeRes = await repository.updateTaskState(
+        taskId("task-104"),
+        { status: "completed", output: "PG Done" },
+        2,
+      );
+      expect(completeRes.ok).toBe(true);
+
+      // Attempt to mutate completed task
+      const illegalRes = await repository.updateTaskState(
+        taskId("task-104"),
+        { status: "running" },
+        3,
+      );
+      expect(illegalRes.ok).toBe(false);
+      if (!illegalRes.ok) {
+        expect(illegalRes.error).toBeInstanceOf(TerminalStateError);
+        expect(illegalRes.error.code).toBe("TERMINAL_STATE_ERROR");
+      }
     });
   });
 });

@@ -13,13 +13,18 @@ import type {
   RunStatus,
   RunSummary,
   Task,
+  TaskStateUpdate,
   TaskStatus,
 } from "@aegis/contracts";
 import {
+  err,
   eventId,
+  ok,
   runId,
   taskId,
+  workerId,
   workflowId,
+  type Result,
   type RunId,
   type TaskId,
 } from "@aegis/types";
@@ -36,6 +41,12 @@ import {
 import type { PostgresJsDatabase } from "drizzle-orm/postgres-js";
 
 import type { DatabaseContext } from "../db/client.js";
+import {
+  ConcurrencyConflictError,
+  type DomainError,
+  TaskNotFoundError,
+} from "../domain/errors.js";
+import { assertValidTaskTransition } from "../domain/lifecycle.js";
 import {
   runEventsTable,
   runsTable,
@@ -68,6 +79,9 @@ function mapTaskRowToTask(row: typeof tasksTable.$inferSelect): Task {
     status: row.status as TaskStatus,
     description: row.description,
     attemptCount: row.attemptCount,
+    worker: row.workerId ? workerId(row.workerId) : undefined,
+    workerId: row.workerId ? workerId(row.workerId) : undefined,
+    version: row.version,
     startedAt: toIsoString(row.startedAt),
     completedAt: toIsoString(row.completedAt),
     output: row.output ?? undefined,
@@ -259,6 +273,8 @@ export class PostgresRunRepository implements IRunRepository {
               description: task.description,
               status: task.status,
               attemptCount: task.attemptCount,
+              workerId: task.workerId ?? task.worker ?? null,
+              version: task.version ?? 1,
               startedAt: task.startedAt ?? null,
               completedAt: task.completedAt ?? null,
               output: task.output ?? null,
@@ -272,6 +288,8 @@ export class PostgresRunRepository implements IRunRepository {
                 description: task.description,
                 status: task.status,
                 attemptCount: task.attemptCount,
+                workerId: task.workerId ?? task.worker ?? null,
+                version: task.version ?? 1,
                 startedAt: task.startedAt ?? null,
                 completedAt: task.completedAt ?? null,
                 output: task.output ?? null,
@@ -420,6 +438,8 @@ export class PostgresRunRepository implements IRunRepository {
             description: task.description,
             status: task.status,
             attemptCount: task.attemptCount,
+            workerId: task.workerId ?? task.worker ?? null,
+            version: task.version ?? 1,
             startedAt: task.startedAt ?? null,
             completedAt: task.completedAt ?? null,
             output: task.output ?? null,
@@ -446,5 +466,68 @@ export class PostgresRunRepository implements IRunRepository {
         }
       }
     });
+  }
+
+  async updateTaskState(
+    targetTaskId: TaskId,
+    update: TaskStateUpdate,
+    expectedVersion: number,
+  ): Promise<Result<{ readonly newVersion: number }, ConcurrencyConflictError | DomainError>> {
+    // 1. Fetch current task row to verify existence and check terminal status
+    const [existingRow] = await this.db
+      .select()
+      .from(tasksTable)
+      .where(eq(tasksTable.id, targetTaskId))
+      .limit(1);
+
+    if (!existingRow) {
+      return err(new TaskNotFoundError(targetTaskId));
+    }
+
+    // 2. Validate lifecycle transition and check terminal state immutability
+    const currentStatus = existingRow.status as TaskStatus;
+    const transitionCheck = assertValidTaskTransition(currentStatus, update.status);
+    if (!transitionCheck.ok) {
+      return transitionCheck;
+    }
+
+    // 3. Perform atomic update guarded by expectedVersion
+    const updatedRows = await this.db
+      .update(tasksTable)
+      .set({
+        status: update.status,
+        ...(update.workerId !== undefined ? { workerId: update.workerId } : {}),
+        ...(update.startedAt !== undefined ? { startedAt: update.startedAt } : {}),
+        ...(update.completedAt !== undefined ? { completedAt: update.completedAt } : {}),
+        ...(update.output !== undefined ? { output: update.output } : {}),
+        ...(update.error !== undefined ? { error: update.error } : {}),
+        version: expectedVersion + 1,
+      })
+      .where(
+        and(
+          eq(tasksTable.id, targetTaskId),
+          eq(tasksTable.version, expectedVersion),
+        ),
+      )
+      .returning({ version: tasksTable.version });
+
+    if (updatedRows.length === 0) {
+      // Re-fetch to report actual current version
+      const [currentRow] = await this.db
+        .select({ version: tasksTable.version })
+        .from(tasksTable)
+        .where(eq(tasksTable.id, targetTaskId))
+        .limit(1);
+
+      return err(
+        new ConcurrencyConflictError(
+          targetTaskId,
+          expectedVersion,
+          currentRow?.version,
+        ),
+      );
+    }
+
+    return ok({ newVersion: updatedRows[0].version });
   }
 }
