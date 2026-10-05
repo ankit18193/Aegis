@@ -89,3 +89,4 @@ export * from "./workerHeartbeat.js";
 export * from "./taskDispatch.js";
 export * from "./leases.js";
 export * from "./outbox.js";
+export * from "./recovery.js";
