@@ -84,6 +84,7 @@ export type TaskInput = z.infer<typeof taskInputSchema>;
 
 export const taskSchema = z.object({
   id: taskIdSchema,
+  runId: runIdSchema.optional(),
   name: z.string().min(1),
   status: taskStatusSchema,
   description: z.string().default(""),

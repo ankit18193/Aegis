@@ -429,7 +429,9 @@ export class InMemoryRunRepository implements IRunRepository {
           task.leaseUntil < cutoffIso &&
           !task.leaseExpiredAt
         ) {
-          candidates.push(structuredClone(task));
+          const candidate = structuredClone(task);
+          candidate.runId = run.id;
+          candidates.push(candidate);
         }
       }
     }

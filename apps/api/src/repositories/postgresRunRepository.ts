@@ -85,6 +85,7 @@ function toIsoStringRequired(dateOrStr: string | Date): string {
 function mapTaskRowToTask(row: typeof tasksTable.$inferSelect): Task {
   return {
     id: taskId(row.id),
+    runId: row.runId ? runId(row.runId) : undefined,
     name: row.name,
     status: row.status as TaskStatus,
     description: row.description,

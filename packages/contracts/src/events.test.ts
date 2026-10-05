@@ -25,6 +25,7 @@ describe("Event Contracts & Schemas", () => {
         "task_completed",
         "task_failed",
         "task_cancelled",
+        "task_lease_expired",
         "tool_invoked",
         "run_completed",
         "run_failed",
