@@ -119,3 +119,19 @@ export class TaskNotFoundError extends DomainError {
   }
 }
 
+/**
+ * Thrown or returned when an optimistic concurrency version conflict occurs during durable task update.
+ */
+export class ConcurrencyConflictError extends DomainError {
+  readonly code = "CONCURRENCY_CONFLICT" as const;
+
+  constructor(
+    readonly taskId: string,
+    readonly expectedVersion: number,
+    readonly actualVersion?: number,
+  ) {
+    const actualDetail = actualVersion !== undefined ? `, actual version is ${actualVersion}` : "";
+    super(`Concurrency conflict updating task '${taskId}': expected version ${expectedVersion}${actualDetail}`);
+  }
+}
+

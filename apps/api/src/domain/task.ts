@@ -19,6 +19,8 @@ export interface TaskSnapshot {
   readonly status: TaskStatus;
   readonly description?: string | undefined;
   readonly worker?: WorkerId | undefined;
+  readonly workerId?: WorkerId | undefined;
+  readonly version?: number | undefined;
   readonly startedAt?: string | undefined;
   readonly completedAt?: string | undefined;
   readonly attemptCount: number;
@@ -39,6 +41,7 @@ export interface CreateTaskProps {
 export class TaskEntity {
   private _status: TaskStatus;
   private _worker?: WorkerId | undefined;
+  private _version: number;
   private _startedAt?: string | undefined;
   private _completedAt?: string | undefined;
   private _attemptCount: number;
@@ -59,10 +62,12 @@ export class TaskEntity {
     output?: string,
     error?: string,
     input?: Record<string, unknown> | string,
+    version = 1,
   ) {
     this._status = status;
     this._attemptCount = attemptCount;
     this._worker = worker;
+    this._version = version;
     this._startedAt = startedAt;
     this._completedAt = completedAt;
     this._output = output;
@@ -84,6 +89,7 @@ export class TaskEntity {
       undefined,
       undefined,
       props.input,
+      1,
     );
   }
 
@@ -95,12 +101,13 @@ export class TaskEntity {
       snapshot.dependencies ?? [],
       snapshot.status,
       snapshot.attemptCount,
-      snapshot.worker,
+      snapshot.workerId ?? snapshot.worker,
       snapshot.startedAt,
       snapshot.completedAt,
       snapshot.output,
       snapshot.error,
       snapshot.input,
+      snapshot.version ?? 1,
     );
   }
 
@@ -110,6 +117,14 @@ export class TaskEntity {
 
   get worker(): WorkerId | undefined {
     return this._worker;
+  }
+
+  get workerId(): WorkerId | undefined {
+    return this._worker;
+  }
+
+  get version(): number {
+    return this._version;
   }
 
   get startedAt(): string | undefined {
@@ -149,6 +164,7 @@ export class TaskEntity {
       return check;
     }
     this._status = "queued";
+    this._version += 1;
     return ok(undefined);
   }
 
@@ -167,6 +183,7 @@ export class TaskEntity {
     this._worker = worker;
     this._startedAt = startedAt;
     this._attemptCount += 1;
+    this._version += 1;
     return ok(undefined);
   }
 
@@ -184,6 +201,7 @@ export class TaskEntity {
     this._status = "completed";
     this._completedAt = completedAt;
     this._output = output;
+    this._version += 1;
     return ok(undefined);
   }
 
@@ -201,6 +219,7 @@ export class TaskEntity {
     this._status = "failed";
     this._completedAt = completedAt;
     this._error = errorMessage;
+    this._version += 1;
     return ok(undefined);
   }
 
@@ -220,6 +239,7 @@ export class TaskEntity {
     if (reason) {
       this._error = reason;
     }
+    this._version += 1;
     return ok(undefined);
   }
 
@@ -230,6 +250,8 @@ export class TaskEntity {
       status: this._status,
       description: this.description,
       worker: this._worker,
+      workerId: this._worker,
+      version: this._version,
       startedAt: this._startedAt,
       completedAt: this._completedAt,
       attemptCount: this._attemptCount,
