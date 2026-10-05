@@ -31,6 +31,9 @@ export type AssignmentId = Brand<string, "AssignmentId">;
 /** A unique identifier for a Worker Heartbeat. */
 export type HeartbeatId = Brand<string, "HeartbeatId">;
 
+/** A unique identifier for a Task Lease. */
+export type LeaseId = Brand<string, "LeaseId">;
+
 /**
  * Creates a branded RunId from a raw string.
  * Use this at trust boundaries (e.g., when reading from an API or database).
@@ -87,6 +90,13 @@ export function assignmentId(raw: string): AssignmentId {
  */
 export function heartbeatId(raw: string): HeartbeatId {
   return raw as HeartbeatId;
+}
+
+/**
+ * Creates a branded LeaseId from a raw string.
+ */
+export function leaseId(raw: string): LeaseId {
+  return raw as LeaseId;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

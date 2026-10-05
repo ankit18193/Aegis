@@ -97,6 +97,9 @@ export const taskSchema = z.object({
   output: z.string().optional(),
   error: z.string().optional(),
   dependencies: z.array(taskIdSchema).optional(),
+  leaseId: z.string().optional(),
+  leaseUntil: z.string().optional(),
+  leaseExpiredAt: z.string().optional(),
 });
 export type Task = z.infer<typeof taskSchema>;
 
@@ -107,6 +110,9 @@ export const taskStateUpdateSchema = z.object({
   completedAt: z.string().optional(),
   output: z.string().optional(),
   error: z.string().optional(),
+  leaseId: z.string().optional(),
+  leaseUntil: z.string().optional(),
+  leaseExpiredAt: z.string().optional(),
 });
 export type TaskStateUpdate = z.infer<typeof taskStateUpdateSchema>;
 
