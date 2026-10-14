@@ -12,6 +12,9 @@ import { sql } from "drizzle-orm";
 import { buildApp } from "./app.js";
 import { loadApiConfig } from "./config/index.js";
 import { createDatabaseContext, type DatabaseContext } from "./db/client.js";
+import { TaskLeaseMonitor } from "./dispatch/leaseMonitor.js";
+import { OrphanRecoveryCoordinator } from "./dispatch/recoveryCoordinator.js";
+import { DeterministicWorkerSelector } from "./dispatch/workerSelector.js";
 import { OutboxPublisher } from "./events/outboxPublisher.js";
 import { KafkaClientManager } from "./infrastructure/kafka/client.js";
 import {
@@ -20,6 +23,7 @@ import {
 } from "./infrastructure/kafka/lifecycle.js";
 import { KafkaEventPublisher } from "./infrastructure/kafka/publisher.js";
 import { McpProcessRegistry } from "./mcp/lifecycle.js";
+import { InMemoryWorkerRegistry } from "./presence/workerRegistry.js";
 import { InMemoryRunRepository } from "./repositories/inMemoryRunRepository.js";
 import { PostgresOutboxRepository } from "./repositories/postgresOutboxRepository.js";
 import { PostgresRunRepository } from "./repositories/postgresRunRepository.js";
@@ -33,7 +37,7 @@ async function main(): Promise<void> {
 
   logger.info("Aegis API initializing", {
     version: "0.1.0",
-    phase: "Phase 5 — Persistent State",
+    phase: "Phase 12D — Orphan Recovery & Automatic Reassignment",
     port: config.port,
     host: config.host,
     nodeEnv: config.nodeEnv,
@@ -93,11 +97,32 @@ async function main(): Promise<void> {
     outboxPublisher.start();
   }
 
+  const workerRegistry = new InMemoryWorkerRegistry({ logger });
+  const workerSelector = new DeterministicWorkerSelector({ logger });
+
+  const recoveryCoordinator = new OrphanRecoveryCoordinator({
+    repository,
+    workerRegistry,
+    workerSelector,
+    logger,
+  });
+  void recoveryCoordinator.start();
+
+  const leaseMonitor = new TaskLeaseMonitor({
+    repository,
+    logger,
+    onLeaseExpired: (task) => {
+      void recoveryCoordinator.recoverOrphan(task.id, task);
+    },
+  });
+  leaseMonitor.start();
+
   const app = await buildApp({
     logger,
     runRepository: repository,
     databaseContext,
     outboxPublisher,
+    recoveryCoordinator,
   });
 
   if (eventPublisher) {
@@ -130,6 +155,8 @@ async function main(): Promise<void> {
       logger.info(`Received ${signal}, shutting down gracefully...`);
       void (async () => {
         McpProcessRegistry.getInstance().detachSignalHandlers();
+        leaseMonitor.stop();
+        await recoveryCoordinator.stop();
         if (outboxPublisher) {
           await outboxPublisher.stop();
         }

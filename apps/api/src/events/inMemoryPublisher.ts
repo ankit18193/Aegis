@@ -28,6 +28,7 @@ export class InMemoryEventPublisher implements IEventPublisher {
 
   publish(
     envelope: EventEnvelope,
+    topic?: string,
   ): Promise<Result<EventPublishResult, EventPublishError>> {
     if (this._simulatedError) {
       return Promise.resolve(err(this._simulatedError));
@@ -37,7 +38,7 @@ export class InMemoryEventPublisher implements IEventPublisher {
     return Promise.resolve(
       ok({
         success: true,
-        topic: this.topic,
+        topic: topic ?? this.topic,
         partition: 0,
         offset: String(this._published.length - 1),
       }),
@@ -46,17 +47,19 @@ export class InMemoryEventPublisher implements IEventPublisher {
 
   publishBatch(
     envelopes: readonly EventEnvelope[],
+    topic?: string,
   ): Promise<Result<readonly EventPublishResult[], EventPublishError>> {
     if (this._simulatedError) {
       return Promise.resolve(err(this._simulatedError));
     }
 
     const results: EventPublishResult[] = [];
+    const effectiveTopic = topic ?? this.topic;
     for (const env of envelopes) {
       this._published.push(env);
       results.push({
         success: true,
-        topic: this.topic,
+        topic: effectiveTopic,
         partition: 0,
         offset: String(this._published.length - 1),
       });

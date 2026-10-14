@@ -138,6 +138,26 @@ export class TaskResultConsumer {
       return false;
     }
 
+    // Lock 9: Late-result rejection
+    // If the task was reassigned to another worker, reject late results from superseded worker.
+    if (task.workerId && task.workerId !== workerId) {
+      this.logger?.warn("Stale task result rejected: worker mismatch (task reassigned)", {
+        taskId,
+        assignedWorkerId: task.workerId,
+        resultWorkerId: workerId,
+      });
+      return false;
+    }
+
+    // Reject results for tasks not currently in running state
+    if (task.status !== "running") {
+      this.logger?.warn("Stale task result rejected: task is not in running state", {
+        taskId,
+        currentStatus: task.status,
+      });
+      return false;
+    }
+
     const targetStatus = status === "SUCCEEDED" ? "completed" : "failed";
     const serializedOutput =
       output !== undefined

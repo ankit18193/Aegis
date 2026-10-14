@@ -100,9 +100,13 @@ export type EventPublishResult = z.infer<typeof eventPublishResultSchema>;
  * Single canonical contract for publishing events across the Aegis platform.
  */
 export interface IEventPublisher {
-  publish(envelope: EventEnvelope): Promise<Result<EventPublishResult, EventPublishErrorContract>>;
+  publish(
+    envelope: EventEnvelope,
+    topic?: string,
+  ): Promise<Result<EventPublishResult, EventPublishErrorContract>>;
   publishBatch(
     envelopes: readonly EventEnvelope[],
+    topic?: string,
   ): Promise<Result<readonly EventPublishResult[], EventPublishErrorContract>>;
 }
 

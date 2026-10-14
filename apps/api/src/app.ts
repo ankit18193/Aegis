@@ -1,3 +1,4 @@
+import type { IRecoveryCoordinator } from "@aegis/contracts";
 import { createLogger, type Logger } from "@aegis/logger";
 import cors from "@fastify/cors";
 import fastify, { type FastifyInstance } from "fastify";
@@ -31,6 +32,7 @@ export interface BuildAppOptions {
   mcpClientManager?: McpClientManager | undefined;
   mcpServerConfigs?: readonly McpServerConfig[] | undefined;
   outboxPublisher?: OutboxPublisher | undefined;
+  recoveryCoordinator?: IRecoveryCoordinator | undefined;
 }
 
 /**
@@ -102,6 +104,13 @@ export async function buildApp(options: BuildAppOptions = {}): Promise<FastifyIn
     const publisher = options.outboxPublisher;
     app.addHook("onClose", async () => {
       await publisher.stop();
+    });
+  }
+
+  if (options.recoveryCoordinator) {
+    const coordinator = options.recoveryCoordinator;
+    app.addHook("onClose", async () => {
+      await coordinator.stop();
     });
   }
 

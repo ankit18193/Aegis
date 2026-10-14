@@ -142,6 +142,7 @@ export class KafkaEventPublisher implements IEventPublisher {
    */
   async publish(
     envelope: EventEnvelope,
+    topic?: string,
   ): Promise<Result<EventPublishResult, EventPublishErrorContract>> {
     if (!this._connected) {
       return err(
@@ -157,10 +158,11 @@ export class KafkaEventPublisher implements IEventPublisher {
     }
 
     const headers = buildCloudEventsHeaders(envelope);
+    const effectiveTopic = topic ?? this.topic;
 
     try {
       const recordMetas: RecordMetadata[] = await this.producer.send({
-        topic: this.topic,
+        topic: effectiveTopic,
         messages: [
           {
             key: envelope.aggregateId,
@@ -173,7 +175,7 @@ export class KafkaEventPublisher implements IEventPublisher {
       const meta = recordMetas[0];
       return ok({
         success: true,
-        topic: meta?.topicName ?? this.topic,
+        topic: meta?.topicName ?? effectiveTopic,
         partition: meta?.partition,
         offset: meta?.offset,
         messageId: undefined, // KafkaJS provides partition/offset, no broker messageId
@@ -195,6 +197,7 @@ export class KafkaEventPublisher implements IEventPublisher {
    */
   async publishBatch(
     envelopes: readonly EventEnvelope[],
+    topic?: string,
   ): Promise<Result<readonly EventPublishResult[], EventPublishErrorContract>> {
     if (envelopes.length === 0) {
       return ok([]);
@@ -223,9 +226,10 @@ export class KafkaEventPublisher implements IEventPublisher {
     }
 
     // Step 2: Transmit batch to Kafka
+    const effectiveTopic = topic ?? this.topic;
     try {
       const recordMetas: RecordMetadata[] = await this.producer.send({
-        topic: this.topic,
+        topic: effectiveTopic,
         messages,
       });
 

@@ -33,11 +33,12 @@ function createSampleEnvelope(idStr: string, rIdStr: string): EventEnvelope {
 
 class MockEventPublisher implements IEventPublisher {
   public publishedBatches: EventEnvelope[][] = [];
+  public publishedTopics: (string | undefined)[] = [];
   public shouldFail = false;
   public failureError = "Simulated Kafka broker outage";
 
-  publish(envelope: EventEnvelope): Promise<Result<EventPublishResult, EventPublishErrorContract>> {
-    return this.publishBatch([envelope]).then((res) => {
+  publish(envelope: EventEnvelope, topic?: string): Promise<Result<EventPublishResult, EventPublishErrorContract>> {
+    return this.publishBatch([envelope], topic).then((res) => {
       if (!res.ok) {
         return err(res.error);
       }
@@ -51,6 +52,7 @@ class MockEventPublisher implements IEventPublisher {
 
   publishBatch(
     envelopes: readonly EventEnvelope[],
+    topic?: string,
   ): Promise<Result<readonly EventPublishResult[], EventPublishErrorContract>> {
     if (this.shouldFail) {
       return Promise.resolve(
@@ -62,9 +64,10 @@ class MockEventPublisher implements IEventPublisher {
     }
 
     this.publishedBatches.push([...envelopes]);
+    this.publishedTopics.push(topic);
     const results: EventPublishResult[] = envelopes.map((e, idx) => ({
       success: true,
-      topic: "aegis.events",
+      topic: topic ?? "aegis.events",
       partition: 0,
       offset: String(idx),
       messageId: e.id,
@@ -268,6 +271,58 @@ describe("OutboxPublisher (Phase 12C — Commit 4)", () => {
     await stopPromise;
 
     expect(outboxPublisher.publishedCount).toBe(1);
+    expect(await outboxRepo.getPendingCount()).toBe(0);
+  });
+
+  it("groups claimed records by target topic and publishes batches to designated topics", async () => {
+    const env1 = createSampleEnvelope("evt-topic-1", "run-topic");
+    const env2 = createSampleEnvelope("evt-topic-2", "run-topic");
+    const env3 = createSampleEnvelope("evt-topic-3", "run-topic");
+
+    const records: CreateOutboxRecord[] = [
+      {
+        id: outboxEventId("outbox-t1"),
+        aggregateId: "run-topic",
+        aggregateType: "ExecutionRun",
+        eventType: "task_assigned",
+        topic: "aegis.tasks.assign.worker-1",
+        payload: env1,
+      },
+      {
+        id: outboxEventId("outbox-t2"),
+        aggregateId: "run-topic",
+        aggregateType: "ExecutionRun",
+        eventType: "task_assigned",
+        topic: "aegis.tasks.assign.worker-1",
+        payload: env2,
+      },
+      {
+        id: outboxEventId("outbox-t3"),
+        aggregateId: "run-topic",
+        aggregateType: "ExecutionRun",
+        eventType: "task_completed",
+        // no topic specified -> fallback to defaultTopic
+        payload: env3,
+      },
+    ];
+
+    await outboxRepo.insert(records);
+
+    const outboxPublisher = new OutboxPublisher({
+      outboxRepository: outboxRepo,
+      eventPublisher: publisher,
+      defaultTopic: "aegis.events",
+    });
+
+    const result = await outboxPublisher.sweepOnce();
+    expect(result.claimedCount).toBe(3);
+    expect(result.publishedCount).toBe(3);
+    expect(result.failedCount).toBe(0);
+
+    // Two distinct batches dispatched to distinct topics
+    expect(publisher.publishedBatches).toHaveLength(2);
+    expect(publisher.publishedTopics).toContain("aegis.tasks.assign.worker-1");
+    expect(publisher.publishedTopics).toContain("aegis.events");
     expect(await outboxRepo.getPendingCount()).toBe(0);
   });
 });

@@ -9,6 +9,7 @@ import type { IOutboxRepository, OutboxRecord } from "../repositories/outboxRepo
 export interface OutboxPublisherOptions {
   readonly outboxRepository: IOutboxRepository;
   readonly eventPublisher: IEventPublisher;
+  readonly defaultTopic?: string | undefined;
   readonly pollIntervalMs?: number | undefined;
   readonly batchSize?: number | undefined;
   readonly lockDurationMs?: number | undefined;
@@ -26,18 +27,20 @@ export interface OutboxSweepResult {
 }
 
 /**
- * OutboxPublisher — Phase 12C: Background Transactional Outbox Dispatch Service.
+ * OutboxPublisher — Phase 12C/12D: Background Transactional Outbox Dispatch Service.
  *
  * Implements the transactional outbox polling publisher:
  * 1. Periodically sweeps pending outbox records using `FOR UPDATE SKIP LOCKED`.
- * 2. Dispatches claimed event envelopes as a batch to canonical `IEventPublisher`.
- * 3. On success, transitions records to `published` status and records latency metrics.
- * 4. On failure, applies exponential backoff, increments attempt counts, and marks records `failed`.
- * 5. Provides graceful shutdown by draining the in-flight publication batch on `stop()`.
+ * 2. Groups claimed records by target topic (record.topic ?? defaultTopic).
+ * 3. Dispatches each topic group as a batch to canonical `IEventPublisher`.
+ * 4. On success, transitions records to `published` status and records latency metrics.
+ * 5. On failure, applies exponential backoff, increments attempt counts, and marks records `failed`.
+ * 6. Provides graceful shutdown by draining the in-flight publication batch on `stop()`.
  */
 export class OutboxPublisher {
   private readonly outboxRepository: IOutboxRepository;
   private readonly eventPublisher: IEventPublisher;
+  private readonly defaultTopic: string;
   private readonly pollIntervalMs: number;
   private readonly batchSize: number;
   private readonly lockDurationMs: number;
@@ -58,6 +61,7 @@ export class OutboxPublisher {
   constructor(options: OutboxPublisherOptions) {
     this.outboxRepository = options.outboxRepository;
     this.eventPublisher = options.eventPublisher;
+    this.defaultTopic = options.defaultTopic ?? "aegis.events";
     this.pollIntervalMs = options.pollIntervalMs ?? DEFAULT_OUTBOX_CONFIG.pollIntervalMs;
     this.batchSize = options.batchSize ?? DEFAULT_OUTBOX_CONFIG.batchSize;
     this.lockDurationMs = options.lockDurationMs ?? DEFAULT_OUTBOX_CONFIG.lockDurationMs;
@@ -179,80 +183,92 @@ export class OutboxPublisher {
       return { claimedCount: 0, publishedCount: 0, failedCount: 0 };
     }
 
-    const envelopes: EventEnvelope[] = claimedRecords.map((r) => r.payload as EventEnvelope);
-
-    let publishResult;
-    try {
-      publishResult = await this.eventPublisher.publishBatch(envelopes);
-    } catch (err: unknown) {
-      const msg = err instanceof Error ? err.message : String(err);
-      publishResult = { ok: false as const, error: { code: "BROKER_UNAVAILABLE" as const, message: msg } };
-    }
-
-    if (publishResult.ok) {
-      try {
-        const ids = claimedRecords.map((r) => r.id);
-        const now = new Date();
-        await this.outboxRepository.markPublished(ids, now);
-        this._publishedCount += claimedRecords.length;
-
-        this.logger?.info("Published outbox batch successfully", {
-          count: claimedRecords.length,
-          workerId: this.workerId,
-        });
-
-        return {
-          claimedCount: claimedRecords.length,
-          publishedCount: claimedRecords.length,
-          failedCount: 0,
-        };
-      } catch (err: unknown) {
-        const msg = err instanceof Error ? err.message : String(err);
-        this.logger?.error("Failed to mark outbox records as published", {
-          error: msg,
-          count: claimedRecords.length,
-        });
-        return {
-          claimedCount: claimedRecords.length,
-          publishedCount: 0,
-          failedCount: claimedRecords.length,
-        };
-      }
-    }
-
-    // Publication failed — apply exponential backoff per record
-    const errorMsg = publishResult.error.message;
-    this.logger?.warn("Batch outbox event publication failed; applying backoff", {
-      count: claimedRecords.length,
-      error: errorMsg,
-    });
-
+    // Group claimed records by target topic
+    const topicGroups = new Map<string, OutboxRecord[]>();
     for (const record of claimedRecords) {
-      const attemptsUsed = record.attemptCount;
-      const isTerminal = attemptsUsed >= this.maxAttempts;
-      const delayMs = Math.min(
-        this.backoffMaxMs,
-        this.backoffBaseMs * Math.pow(2, Math.max(0, attemptsUsed - 1)),
-      );
-      const nextLockedUntil = isTerminal ? undefined : new Date(Date.now() + delayMs);
-
-      try {
-        await this.outboxRepository.markFailed(record.id, errorMsg, nextLockedUntil);
-      } catch (err: unknown) {
-        const msg = err instanceof Error ? err.message : String(err);
-        this.logger?.error("Failed to mark outbox record as failed", {
-          id: record.id,
-          error: msg,
-        });
+      const topic = record.topic ?? this.defaultTopic;
+      const group = topicGroups.get(topic);
+      if (group) {
+        group.push(record);
+      } else {
+        topicGroups.set(topic, [record]);
       }
     }
 
-    this._failedCount += claimedRecords.length;
+    let totalPublished = 0;
+    let totalFailed = 0;
+
+    for (const [topic, groupRecords] of topicGroups.entries()) {
+      const envelopes: EventEnvelope[] = groupRecords.map((r) => r.payload as EventEnvelope);
+
+      let publishResult;
+      try {
+        publishResult = await this.eventPublisher.publishBatch(envelopes, topic);
+      } catch (err: unknown) {
+        const msg = err instanceof Error ? err.message : String(err);
+        publishResult = { ok: false as const, error: { code: "BROKER_UNAVAILABLE" as const, message: msg } };
+      }
+
+      if (publishResult.ok) {
+        try {
+          const ids = groupRecords.map((r) => r.id);
+          const now = new Date();
+          await this.outboxRepository.markPublished(ids, now);
+          totalPublished += groupRecords.length;
+
+          this.logger?.info("Published outbox batch successfully", {
+            topic,
+            count: groupRecords.length,
+            workerId: this.workerId,
+          });
+        } catch (err: unknown) {
+          const msg = err instanceof Error ? err.message : String(err);
+          this.logger?.error("Failed to mark outbox records as published", {
+            topic,
+            error: msg,
+            count: groupRecords.length,
+          });
+          totalFailed += groupRecords.length;
+        }
+      } else {
+        const errorMsg = publishResult.error.message;
+        this.logger?.warn("Batch outbox event publication failed; applying backoff", {
+          topic,
+          count: groupRecords.length,
+          error: errorMsg,
+        });
+
+        for (const record of groupRecords) {
+          const attemptsUsed = record.attemptCount;
+          const isTerminal = attemptsUsed >= this.maxAttempts;
+          const delayMs = Math.min(
+            this.backoffMaxMs,
+            this.backoffBaseMs * Math.pow(2, Math.max(0, attemptsUsed - 1)),
+          );
+          const nextLockedUntil = isTerminal ? undefined : new Date(Date.now() + delayMs);
+
+          try {
+            await this.outboxRepository.markFailed(record.id, errorMsg, nextLockedUntil);
+          } catch (err: unknown) {
+            const msg = err instanceof Error ? err.message : String(err);
+            this.logger?.error("Failed to mark outbox record as failed", {
+              id: record.id,
+              error: msg,
+            });
+          }
+        }
+
+        totalFailed += groupRecords.length;
+      }
+    }
+
+    this._publishedCount += totalPublished;
+    this._failedCount += totalFailed;
 
     return {
       claimedCount: claimedRecords.length,
-      publishedCount: 0,
-      failedCount: claimedRecords.length,
+      publishedCount: totalPublished,
+      failedCount: totalFailed,
     };
   }
 }

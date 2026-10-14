@@ -1,5 +1,5 @@
 import type { TaskResultEnvelope } from "@aegis/contracts";
-import { assignmentId, eventId, runId, taskId, workerId } from "@aegis/types";
+import { assignmentId, eventId, runId, taskId, workerId, workflowId } from "@aegis/types";
 import { beforeEach, describe, expect, it } from "vitest";
 
 import { InMemoryRunRepository } from "../../repositories/inMemoryRunRepository.js";
@@ -139,7 +139,7 @@ describe("TaskResultConsumer (Phase 12A)", () => {
     const envelope: TaskResultEnvelope = {
       id: eventId("evt-res-4"),
       type: "task_result",
-      source: "aegis/worker/worker-1",
+      source: "aegis/worker/worker-node-1",
       specVersion: "1.0",
       time: "2026-10-05T12:05:00.000Z",
       aggregateId: taskId("task-104"),
@@ -149,7 +149,7 @@ describe("TaskResultConsumer (Phase 12A)", () => {
         taskId: taskId("task-104"),
         runId: runId("run-001"),
         assignmentId: assignmentId("asgn-104"),
-        workerId: workerId("worker-1"),
+        workerId: workerId("worker-node-1"),
         status: "SUCCEEDED",
         startedAt: "2026-10-05T12:00:00.000Z",
         completedAt: "2026-10-05T12:05:00.000Z",
@@ -161,11 +161,114 @@ describe("TaskResultConsumer (Phase 12A)", () => {
 
     // 2. Duplicate second completion arrives
     const secondHandled = await consumer.handleMessage(envelope);
-    expect(secondHandled).toBe(false); // Gracefully rejected due to TerminalStateError
+    expect(secondHandled).toBe(false); // Gracefully rejected due to task no longer being running
 
     // Status remains completed, not corrupted
     const run = await repository.findById(runId("run-001"));
     const task = run?.tasks.find((t) => t.id === "task-104");
     expect(task?.status).toBe("completed");
+  });
+
+  it("strictly rejects late result from superseded worker after task reassignment (Lock 9)", async () => {
+    // Save a run where task-reassign is currently running under worker-node-2
+    const now = new Date().toISOString();
+    await repository.save({
+      id: runId("run-reassign-test"),
+      goal: "Test late result rejection",
+      status: "running",
+      progress: 50,
+      createdAt: now,
+      updatedAt: now,
+      workflow: {
+        id: workflowId("wf-test"),
+        name: "Test Workflow",
+        tasks: [
+          {
+            id: taskId("task-reassign-test"),
+            name: "Test Task",
+            status: "running",
+            description: "Test task",
+            worker: workerId("worker-node-2"),
+            workerId: workerId("worker-node-2"),
+            version: 2,
+            attemptCount: 2,
+          },
+        ],
+      },
+      tasks: [
+        {
+          id: taskId("task-reassign-test"),
+          name: "Test Task",
+          status: "running",
+          description: "Test task",
+          worker: workerId("worker-node-2"),
+          workerId: workerId("worker-node-2"),
+          version: 2,
+          attemptCount: 2,
+        },
+      ],
+    });
+
+    // Stale result arrives late from worker-node-1 (superseded worker)
+    const lateEnvelope: TaskResultEnvelope = {
+      id: eventId("evt-res-late-1"),
+      type: "task_result",
+      source: "aegis/worker/worker-node-1",
+      specVersion: "1.0",
+      time: "2026-10-05T12:15:00.000Z",
+      aggregateId: taskId("task-reassign-test"),
+      aggregateType: "TaskResult",
+      correlationId: "corr-late",
+      data: {
+        taskId: taskId("task-reassign-test"),
+        runId: runId("run-reassign-test"),
+        assignmentId: assignmentId("asgn-late"),
+        workerId: workerId("worker-node-1"), // superseded worker!
+        status: "SUCCEEDED",
+        startedAt: "2026-10-05T12:00:00.000Z",
+        completedAt: "2026-10-05T12:15:00.000Z",
+        output: { result: "late output from dead worker" },
+      },
+    };
+
+    const handled = await consumer.handleMessage(lateEnvelope);
+    expect(handled).toBe(false);
+
+    // Task remains running under worker-node-2, unmodified
+    const run = await repository.findById(runId("run-reassign-test"));
+    const task = run?.tasks.find((t) => t.id === "task-reassign-test");
+    expect(task?.status).toBe("running");
+    expect(task?.workerId).toBe("worker-node-2");
+    expect(task?.version).toBe(2);
+  });
+
+  it("strictly rejects result when task is not in running state (e.g. pending)", async () => {
+    // task-105 in run-001 has status: "pending"
+    const envelope: TaskResultEnvelope = {
+      id: eventId("evt-res-pending"),
+      type: "task_result",
+      source: "aegis/worker/worker-node-1",
+      specVersion: "1.0",
+      time: "2026-10-05T12:05:00.000Z",
+      aggregateId: taskId("task-105"),
+      aggregateType: "TaskResult",
+      correlationId: "corr-pending",
+      data: {
+        taskId: taskId("task-105"),
+        runId: runId("run-001"),
+        assignmentId: assignmentId("asgn-105"),
+        workerId: workerId("worker-node-1"),
+        status: "SUCCEEDED",
+        startedAt: "2026-10-05T12:00:00.000Z",
+        completedAt: "2026-10-05T12:05:00.000Z",
+      },
+    };
+
+    const handled = await consumer.handleMessage(envelope);
+    expect(handled).toBe(false);
+
+    const run = await repository.findById(runId("run-001"));
+    const task = run?.tasks.find((t) => t.id === "task-105");
+    expect(task?.status).toBe("pending");
   });
 });
