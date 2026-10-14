@@ -6,6 +6,8 @@ import { Button } from "../../../components/ui/Button";
 import { EmptyState } from "../../../components/ui/EmptyState";
 import { ActivityTimeline } from "../../events/components/ActivityTimeline";
 import { useRunEvents } from "../../events/hooks/useRunEvents";
+import { ConnectionStatus } from "../../execution/components/ConnectionStatus";
+import { useExecutionStream } from "../../execution/hooks/useExecutionStream";
 import { TaskCard } from "../../tasks/components/TaskCard";
 import { TaskDetailDrawer } from "../../tasks/components/TaskDetailDrawer";
 import { RunHeader } from "../components/RunHeader";
@@ -18,8 +20,22 @@ import type { TaskSummary } from "../types";
 
 export const RunWorkspace: React.FC = () => {
   const { runId } = useParams<{ runId: string }>();
-  const { run, isLoading: isRunLoading, error } = useRun(runId);
-  const { events, isLoading: isEventsLoading } = useRunEvents(runId);
+  const { run: initialRun, isLoading: isRunLoading, error } = useRun(runId);
+  const { events: initialEvents, isLoading: isEventsLoading } = useRunEvents(runId);
+
+  const {
+    run: liveRun,
+    events: liveEvents,
+    connectionState,
+    error: streamError,
+  } = useExecutionStream({
+    runId,
+    initialRun,
+    initialEvents,
+  });
+
+  const run = liveRun ?? initialRun;
+  const events = liveEvents.length > 0 ? [...liveEvents] : initialEvents;
   const [selectedTask, setSelectedTask] = React.useState<TaskSummary | null>(null);
 
   if (isRunLoading) {
@@ -66,8 +82,16 @@ export const RunWorkspace: React.FC = () => {
       className="flex-1 flex flex-col overflow-y-auto"
       data-testid="run-workspace"
     >
-      {/* Run Header with Simulation Controls */}
-      <RunHeader run={run} actions={<SimulationControls run={run} />} />
+      {/* Run Header with Connection Status and Simulation Controls */}
+      <RunHeader
+        run={run}
+        actions={
+          <div className="flex items-center gap-2">
+            <ConnectionStatus status={connectionState} error={streamError} />
+            <SimulationControls run={run} />
+          </div>
+        }
+      />
 
       {/* Progress Bar */}
       <RunProgress run={run} />
