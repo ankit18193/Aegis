@@ -53,6 +53,8 @@ export class OrphanRecoveryCoordinator implements IRecoveryCoordinator {
 
   private timer: NodeJS.Timeout | null = null;
   private _isRunning = false;
+  private isShuttingDown = false;
+  private currentSweepPromise: Promise<Result<RecoverySweepResult, RecoveryError>> | null = null;
   private _sweepsCount = 0;
   private _reassignedCount = 0;
   private _failedCount = 0;
@@ -103,6 +105,7 @@ export class OrphanRecoveryCoordinator implements IRecoveryCoordinator {
       return Promise.resolve();
     }
     this._isRunning = true;
+    this.isShuttingDown = false;
 
     this.logger?.info("Starting control-plane OrphanRecoveryCoordinator", {
       recoveryScanIntervalMs: this.policy.recoveryScanIntervalMs,
@@ -124,22 +127,51 @@ export class OrphanRecoveryCoordinator implements IRecoveryCoordinator {
 
   /**
    * Stops the periodic orphan recovery background loop gracefully.
+   * Drains any in-flight sweep cycle before resolving.
    */
-  public stop(): Promise<void> {
+  public async stop(): Promise<void> {
+    if (!this._isRunning && !this.currentSweepPromise) {
+      return;
+    }
     this._isRunning = false;
+    this.isShuttingDown = true;
+
     if (this.timer) {
       clearInterval(this.timer);
       this.timer = null;
     }
+
+    if (this.currentSweepPromise) {
+      try {
+        await this.currentSweepPromise;
+      } catch {
+        // Drain current in-flight sweep cycle gracefully
+      }
+    }
+
+    this.isShuttingDown = false;
     this.logger?.info("Stopped control-plane OrphanRecoveryCoordinator");
-    return Promise.resolve();
   }
 
   /**
    * Sweeps the persistent store for genuinely orphaned tasks (status = 'running' AND lease_expired_at IS NOT NULL),
    * attempting recovery for each candidate.
+   * Protects against concurrent overlapping sweeps.
    */
-  public async sweepOrphans(limit = 50): Promise<Result<RecoverySweepResult, RecoveryError>> {
+  public sweepOrphans(limit = 50): Promise<Result<RecoverySweepResult, RecoveryError>> {
+    if (this.currentSweepPromise) {
+      this.logger?.debug("Orphan recovery sweep already in progress; skipping overlapping sweep");
+      return this.currentSweepPromise;
+    }
+
+    const promise = this.executeSweep(limit).finally(() => {
+      this.currentSweepPromise = null;
+    });
+    this.currentSweepPromise = promise;
+    return promise;
+  }
+
+  private async executeSweep(limit: number): Promise<Result<RecoverySweepResult, RecoveryError>> {
     this._sweepsCount++;
     const startTime = Date.now();
 
@@ -163,7 +195,19 @@ export class OrphanRecoveryCoordinator implements IRecoveryCoordinator {
     const results: RecoveryResult[] = [];
 
     for (const task of orphans) {
-      const recoveryRes = await this.recoverOrphan(task.id, task);
+      if (this.isShuttingDown) {
+        this.logger?.info("Orphan recovery sweep loop stopping early due to shutdown");
+        break;
+      }
+
+      let recoveryRes: Result<RecoveryResult, RecoveryError>;
+      try {
+        recoveryRes = await this.recoverOrphan(task.id, task);
+      } catch (catchErr: unknown) {
+        const msg = catchErr instanceof Error ? catchErr.message : String(catchErr);
+        recoveryRes = err(new RecoveryError("RECOVERY_FAILED", msg, task.id, catchErr));
+      }
+
       if (recoveryRes.ok) {
         const res = recoveryRes.value;
         results.push(res);

@@ -660,5 +660,101 @@ describe("OrphanRecoveryCoordinator (Phase 12D — Commit 3)", () => {
       expect(sweepRes.value.skippedCount).toBe(0);
       expect(sweepRes.value.results).toEqual([]);
     });
+
+    it("prevents overlapping sweeps when a sweep is already in-flight", async () => {
+      const coordinator = new OrphanRecoveryCoordinator({
+        repository,
+        workerRegistry,
+        workerSelector,
+      });
+
+      workerRegistry.register(createTestWorker("worker-b"));
+      const run = createOrphanedTestRun("run-overlap", "task-overlap", "worker-a", new Date().toISOString());
+      await repository.save(run);
+
+      let signalStarted!: () => void;
+      const startedPromise = new Promise<void>((res) => {
+        signalStarted = res;
+      });
+
+      let releaseDelay!: () => void;
+      const delayedPromise = new Promise<void>((res) => {
+        releaseDelay = res;
+      });
+
+      // Intercept findOrphanedTasks to introduce controlled delay
+      const originalFind = repository.findOrphanedTasks.bind(repository);
+      vi.spyOn(repository, "findOrphanedTasks").mockImplementation(async (limit) => {
+        signalStarted();
+        await delayedPromise;
+        return originalFind(limit);
+      });
+
+      // Trigger first sweep asynchronously
+      const sweep1Promise = coordinator.sweepOrphans(10);
+      await startedPromise;
+
+      // Trigger second sweep while first is still in-flight
+      const sweep2Promise = coordinator.sweepOrphans(10);
+
+      // Both promises must reference the exact same sweep operation
+      expect(sweep1Promise).toBe(sweep2Promise);
+
+      // Release delay
+      releaseDelay();
+
+      const [res1, res2] = await Promise.all([sweep1Promise, sweep2Promise]);
+      expect(res1.ok).toBe(true);
+      expect(res2.ok).toBe(true);
+      expect(coordinator.sweepsCount).toBe(1);
+    });
+
+    it("drains in-flight sweep batch gracefully when stop() is called during shutdown", async () => {
+      const coordinator = new OrphanRecoveryCoordinator({
+        repository,
+        workerRegistry,
+        workerSelector,
+      });
+
+      workerRegistry.register(createTestWorker("worker-b"));
+      const run = createOrphanedTestRun("run-drain", "task-drain", "worker-a", new Date().toISOString());
+      await repository.save(run);
+
+      let signalStarted!: () => void;
+      const startedPromise = new Promise<void>((res) => {
+        signalStarted = res;
+      });
+
+      let releaseDelay!: () => void;
+      const delayedPromise = new Promise<void>((res) => {
+        releaseDelay = res;
+      });
+
+      const originalReassign = repository.reassignTask.bind(repository);
+      vi.spyOn(repository, "reassignTask").mockImplementation(async (params, outbox) => {
+        signalStarted();
+        await delayedPromise;
+        return originalReassign(params, outbox);
+      });
+
+      // Start sweep
+      const sweepPromise = coordinator.sweepOrphans(10);
+      await startedPromise;
+
+      // Call stop() while recovery is in-flight
+      const stopPromise = coordinator.stop();
+      expect(coordinator.isRunning).toBe(false);
+
+      // Release in-flight operation
+      releaseDelay();
+
+      const sweepRes = await sweepPromise;
+      await stopPromise;
+
+      expect(sweepRes.ok).toBe(true);
+      if (sweepRes.ok) {
+        expect(sweepRes.value.reassignedCount).toBe(1);
+      }
+    });
   });
 });
