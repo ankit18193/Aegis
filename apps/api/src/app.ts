@@ -17,6 +17,7 @@ import { registerHealthRoutes } from "./routes/health.js";
 import { registerRunRoutes } from "./routes/runs.js";
 import { AgentRunService } from "./services/agentRunService.js";
 import type { RunApplicationService } from "./services/runService.js";
+import { registerSseTransportRoutes, SseTransportManager } from "./sse/index.js";
 import { ToolActionExecutor } from "./tools/adapter.js";
 import { registerBuiltinTools } from "./tools/builtins/index.js";
 import { ToolExecutor } from "./tools/executor.js";
@@ -33,6 +34,7 @@ export interface BuildAppOptions {
   mcpServerConfigs?: readonly McpServerConfig[] | undefined;
   outboxPublisher?: OutboxPublisher | undefined;
   recoveryCoordinator?: IRecoveryCoordinator | undefined;
+  sseTransportManager?: SseTransportManager | undefined;
 }
 
 /**
@@ -130,6 +132,10 @@ export async function buildApp(options: BuildAppOptions = {}): Promise<FastifyIn
 
   // Register run operations & event routes
   registerRunRoutes(app, runService);
+
+  // Register SSE transport routes
+  const sseManager = options.sseTransportManager ?? new SseTransportManager({ logger });
+  registerSseTransportRoutes(app, sseManager);
 
   return app;
 }
