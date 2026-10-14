@@ -199,7 +199,39 @@ export class OutboxPublisher {
     let totalFailed = 0;
 
     for (const [topic, groupRecords] of topicGroups.entries()) {
-      const envelopes: EventEnvelope[] = groupRecords.map((r) => r.payload as EventEnvelope);
+      // 1. Guard against crash loops: records that exhausted maxAttempts due to crashes prior to this sweep
+      const executableRecords: OutboxRecord[] = [];
+      for (const record of groupRecords) {
+        if (record.attemptCount > this.maxAttempts) {
+          this.logger?.error("Outbox record exceeded maxAttempts due to repeated process crashes; marking permanently failed", {
+            id: record.id,
+            attemptCount: record.attemptCount,
+            maxAttempts: this.maxAttempts,
+          });
+          try {
+            await this.outboxRepository.markFailed(
+              record.id,
+              `Exceeded max publication attempts (${String(this.maxAttempts)}) due to repeated worker/process crashes`,
+              undefined,
+            );
+          } catch (err: unknown) {
+            const msg = err instanceof Error ? err.message : String(err);
+            this.logger?.error("Failed to mark exhausted outbox record as failed", {
+              id: record.id,
+              error: msg,
+            });
+          }
+          totalFailed++;
+        } else {
+          executableRecords.push(record);
+        }
+      }
+
+      if (executableRecords.length === 0) {
+        continue;
+      }
+
+      const envelopes: EventEnvelope[] = executableRecords.map((r) => r.payload as EventEnvelope);
 
       let publishResult;
       try {
@@ -211,14 +243,14 @@ export class OutboxPublisher {
 
       if (publishResult.ok) {
         try {
-          const ids = groupRecords.map((r) => r.id);
+          const ids = executableRecords.map((r) => r.id);
           const now = new Date();
           await this.outboxRepository.markPublished(ids, now);
-          totalPublished += groupRecords.length;
+          totalPublished += executableRecords.length;
 
           this.logger?.info("Published outbox batch successfully", {
             topic,
-            count: groupRecords.length,
+            count: executableRecords.length,
             workerId: this.workerId,
           });
         } catch (err: unknown) {
@@ -226,19 +258,19 @@ export class OutboxPublisher {
           this.logger?.error("Failed to mark outbox records as published", {
             topic,
             error: msg,
-            count: groupRecords.length,
+            count: executableRecords.length,
           });
-          totalFailed += groupRecords.length;
+          totalFailed += executableRecords.length;
         }
       } else {
         const errorMsg = publishResult.error.message;
         this.logger?.warn("Batch outbox event publication failed; applying backoff", {
           topic,
-          count: groupRecords.length,
+          count: executableRecords.length,
           error: errorMsg,
         });
 
-        for (const record of groupRecords) {
+        for (const record of executableRecords) {
           const attemptsUsed = record.attemptCount;
           const isTerminal = attemptsUsed >= this.maxAttempts;
           const delayMs = Math.min(
@@ -258,7 +290,7 @@ export class OutboxPublisher {
           }
         }
 
-        totalFailed += groupRecords.length;
+        totalFailed += executableRecords.length;
       }
     }
 

@@ -325,4 +325,71 @@ describe("OutboxPublisher (Phase 12C — Commit 4)", () => {
     expect(publisher.publishedTopics).toContain("aegis.events");
     expect(await outboxRepo.getPendingCount()).toBe(0);
   });
+
+  it("terminates and marks failed records exceeding maxAttempts due to prior process crashes", async () => {
+    const env = createSampleEnvelope("evt-exhausted-1", "run-exhausted");
+
+    // Insert record with attemptCount = 3 (when maxAttempts = 3, claimPending will bump to 4)
+    await outboxRepo.insert([
+      {
+        id: outboxEventId("outbox-exhausted-1"),
+        aggregateId: "run-exhausted",
+        aggregateType: "ExecutionRun",
+        eventType: "task_completed",
+        payload: env,
+        attemptCount: 3,
+      },
+    ]);
+
+    const outboxPublisher = new OutboxPublisher({
+      outboxRepository: outboxRepo,
+      eventPublisher: publisher,
+      maxAttempts: 3,
+    });
+
+    const result = await outboxPublisher.sweepOnce();
+    expect(result.claimedCount).toBe(1);
+    expect(result.publishedCount).toBe(0);
+    expect(result.failedCount).toBe(1);
+
+    // Verify publisher was NEVER called for the exhausted record
+    expect(publisher.publishedBatches).toHaveLength(0);
+
+    // Verify record transitioned to failed status
+    expect(await outboxRepo.getPendingCount()).toBe(0);
+    expect(await outboxRepo.getFailedCount()).toBe(1);
+  });
+
+  it("handles markPublished error gracefully without crashing publisher loop", async () => {
+    const env = createSampleEnvelope("evt-err-1", "run-err");
+    await outboxRepo.insert([
+      {
+        id: outboxEventId("outbox-err-1"),
+        aggregateId: "run-err",
+        aggregateType: "ExecutionRun",
+        eventType: "task_completed",
+        payload: env,
+      },
+    ]);
+
+    // Force outboxRepo.markPublished to reject
+    const originalMarkPublished = outboxRepo.markPublished.bind(outboxRepo);
+    outboxRepo.markPublished = () => Promise.reject(new Error("Database connection dropped"));
+
+    const outboxPublisher = new OutboxPublisher({
+      outboxRepository: outboxRepo,
+      eventPublisher: publisher,
+    });
+
+    const result = await outboxPublisher.sweepOnce();
+    expect(result.claimedCount).toBe(1);
+    expect(result.publishedCount).toBe(0);
+    expect(result.failedCount).toBe(1);
+
+    // Publisher did send to Kafka (at-least-once bridge intact)
+    expect(publisher.publishedBatches).toHaveLength(1);
+
+    // Restore original method
+    outboxRepo.markPublished = originalMarkPublished;
+  });
 });
