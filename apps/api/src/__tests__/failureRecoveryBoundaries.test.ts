@@ -34,7 +34,7 @@ import {
   workflowId,
   type Result,
 } from "@aegis/types";
-import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { createDatabaseContext, type DatabaseContext } from "../db/client.js";
 import { runMigrations } from "../db/migrator.js";
@@ -139,7 +139,12 @@ function createRunningRun(
   rId: string,
   tId: string,
   wId: string,
-  opts?: { leaseExpiredAt?: string | undefined; version?: number | undefined },
+  opts?: {
+    leaseExpiredAt?: string | undefined;
+    leaseUntil?: string | undefined;
+    version?: number | undefined;
+    attemptCount?: number | undefined;
+  },
 ): Run {
   const nowIso = new Date().toISOString();
   const t: Task = {
@@ -148,12 +153,12 @@ function createRunningRun(
     name: "Boundary Unit",
     status: "running",
     description: "Failure boundary task",
-    attemptCount: 1,
+    attemptCount: opts?.attemptCount ?? 1,
     worker: workerId(wId),
     workerId: workerId(wId),
     version: opts?.version ?? 2,
     leaseId: "lease-boundary-1",
-    leaseUntil: new Date(Date.now() + 30000).toISOString(),
+    leaseUntil: opts?.leaseUntil ?? new Date(Date.now() + 30000).toISOString(),
     leaseExpiredAt: opts?.leaseExpiredAt,
     startedAt: nowIso,
   };
@@ -468,6 +473,231 @@ function runFailureBoundaryTests(
 
     expect(publisher.publishedCount).toBe(1);
     expect(await outboxRepo.getPendingCount()).toBe(0);
+  });
+
+  it("Boundary 7: Worker lease expires while task is processing; late result is strictly rejected (Lock 6)", async () => {
+    const runRepo = getRunRepo();
+    const rId = `${prefix}-lease-exp-r1`;
+    const tId = `${prefix}-lease-exp-t1`;
+    const wId = `${prefix}-worker-slow`;
+
+    // Task is running under worker-slow, but lease was marked expired
+    const expiredIso = new Date(Date.now() - 5000).toISOString();
+    await runRepo.save(
+      createRunningRun(rId, tId, wId, {
+        leaseExpiredAt: expiredIso,
+        leaseUntil: expiredIso,
+        version: 2,
+      }),
+    );
+
+    const consumer = new TaskResultConsumer({ runRepository: runRepo });
+    const lateEnvelope: TaskResultEnvelope = {
+      id: eventId("evt-late-exp-1"),
+      type: "task_result",
+      source: `aegis/worker/${wId}`,
+      specVersion: "1.0",
+      time: new Date().toISOString(),
+      aggregateId: taskId(tId),
+      aggregateType: "TaskResult",
+      correlationId: `corr-${tId}`,
+      data: {
+        taskId: taskId(tId),
+        runId: runId(rId),
+        assignmentId: assignmentId("asgn-late-1"),
+        workerId: workerId(wId),
+        status: "SUCCEEDED",
+        startedAt: new Date(Date.now() - 60000).toISOString(),
+        completedAt: new Date().toISOString(),
+        output: { result: "late calculation after lease expired" },
+      },
+    };
+
+    const handled = await consumer.handleMessage(lateEnvelope);
+    expect(handled).toBe(false);
+
+    // Verify task state remains running with version unchanged
+    const run = await runRepo.findById(runId(rId));
+    const task = run?.tasks.find((t) => t.id === tId);
+    expect(task?.status).toBe("running");
+    expect(task?.version).toBe(2);
+  });
+
+  it("Boundary 8: Recovery encounters no alternative eligible worker; task remains safely isolated without spinning", async () => {
+    const runRepo = getRunRepo();
+    const rId = `${prefix}-no-worker-r1`;
+    const tId = `${prefix}-no-worker-t1`;
+    const wIdOld = `${prefix}-worker-dead`;
+
+    const expiredIso = new Date(Date.now() - 5000).toISOString();
+    await runRepo.save(
+      createRunningRun(rId, tId, wIdOld, {
+        leaseExpiredAt: expiredIso,
+        version: 2,
+        attemptCount: 1,
+      }),
+    );
+
+    // Only register the dead worker itself — no alternatives exist
+    workerRegistry.register(createWorkerDescriptor(wIdOld, 1, 5));
+
+    const coordinator = new OrphanRecoveryCoordinator({
+      repository: runRepo,
+      workerRegistry,
+      workerSelector,
+      policy: { maxAttempts: 3 },
+    });
+
+    const sweepResult = await coordinator.sweepOrphans();
+    expect(sweepResult.ok).toBe(true);
+    if (!sweepResult.ok) return;
+
+    expect(sweepResult.value.scannedCount).toBe(1);
+    expect(sweepResult.value.reassignedCount).toBe(0);
+    expect(sweepResult.value.skippedCount).toBe(1);
+
+    const first = sweepResult.value.results[0];
+    expect(first?.action).toBe("skipped");
+    expect(first?.error).toBe("NO_ELIGIBLE_WORKER");
+
+    // Task is NOT mutated, attemptCount NOT incremented
+    const run = await runRepo.findById(runId(rId));
+    const task = run?.tasks.find((t) => t.id === tId);
+    expect(task?.status).toBe("running");
+    expect(task?.attemptCount).toBe(1);
+    expect(task?.version).toBe(2);
+  });
+
+  it("Boundary 9: Execution retry limit reached; task transitions to terminal failed and emits outbox failure event", async () => {
+    const runRepo = getRunRepo();
+    const outboxRepo = getOutboxRepo();
+    const rId = `${prefix}-exhaust-r1`;
+    const tId = `${prefix}-exhaust-t1`;
+    const wIdOld = `${prefix}-worker-exhaust-old`;
+    const wIdNew = `${prefix}-worker-exhaust-new`;
+
+    // Task has already reached maxAttempts (3)
+    const expiredIso = new Date(Date.now() - 5000).toISOString();
+    await runRepo.save(
+      createRunningRun(rId, tId, wIdOld, {
+        leaseExpiredAt: expiredIso,
+        version: 4,
+        attemptCount: 3,
+      }),
+    );
+
+    workerRegistry.register(createWorkerDescriptor(wIdOld, 1, 5));
+    workerRegistry.register(createWorkerDescriptor(wIdNew, 0, 5));
+
+    const coordinator = new OrphanRecoveryCoordinator({
+      repository: runRepo,
+      workerRegistry,
+      workerSelector,
+      policy: { maxAttempts: 3 },
+    });
+
+    const sweepResult = await coordinator.sweepOrphans();
+    expect(sweepResult.ok).toBe(true);
+    if (!sweepResult.ok) return;
+
+    expect(sweepResult.value.scannedCount).toBe(1);
+    expect(sweepResult.value.reassignedCount).toBe(0);
+    expect(sweepResult.value.failedCount).toBe(1);
+
+    const first = sweepResult.value.results[0];
+    expect(first?.action).toBe("failed");
+    expect(first?.reason).toContain("Execution retry limit exceeded");
+
+    // Verify task is terminal failed
+    const run = await runRepo.findById(runId(rId));
+    const task = run?.tasks.find((t) => t.id === tId);
+    expect(task?.status).toBe("failed");
+    expect(task?.version).toBe(5);
+
+    // Verify outbox has task_failed event and NO task_assigned event
+    const pending = await outboxRepo.claimPending({
+      batchSize: 10,
+      lockDurationMs: 30000,
+      workerId: "test-exhaust-verifier",
+    });
+    const failedOutbox = pending.find((p) => p.eventType === "task_failed");
+    const assignOutbox = pending.find((p) => p.eventType === "task_assigned");
+    expect(failedOutbox).toBeDefined();
+    expect(assignOutbox).toBeUndefined();
+  });
+
+  it("Boundary 10: OrphanRecoveryCoordinator stop() drains in-flight recovery cycle cleanly during process shutdown", async () => {
+    const runRepo = getRunRepo();
+    const rId = `${prefix}-coord-drain-r1`;
+    const tId = `${prefix}-coord-drain-t1`;
+    const wIdOld = `${prefix}-coord-drain-old`;
+    const wIdNew = `${prefix}-coord-drain-new`;
+
+    const expiredIso = new Date(Date.now() - 5000).toISOString();
+    await runRepo.save(
+      createRunningRun(rId, tId, wIdOld, {
+        leaseExpiredAt: expiredIso,
+        version: 2,
+        attemptCount: 1,
+      }),
+    );
+
+    workerRegistry.register(createWorkerDescriptor(wIdOld, 1, 5));
+    workerRegistry.register(createWorkerDescriptor(wIdNew, 0, 5));
+
+    const coordinator = new OrphanRecoveryCoordinator({
+      repository: runRepo,
+      workerRegistry,
+      workerSelector,
+    });
+
+    let signalStarted!: () => void;
+    const startedPromise = new Promise<void>((res) => {
+      signalStarted = res;
+    });
+
+    let releaseDelay!: () => void;
+    const delayedPromise = new Promise<void>((res) => {
+      releaseDelay = res;
+    });
+
+    const originalReassign = runRepo.reassignTask.bind(runRepo);
+    const reassignSpy = vi.spyOn(runRepo, "reassignTask").mockImplementation(async (params, outbox) => {
+      signalStarted();
+      await delayedPromise;
+      return originalReassign(params, outbox);
+    });
+
+    // Start background loop
+    await coordinator.start();
+    expect(coordinator.isRunning).toBe(true);
+
+    // Launch sweep
+    const sweepPromise = coordinator.sweepOrphans();
+    await startedPromise;
+
+    // Call stop() while recovery is in-flight
+    const stopPromise = coordinator.stop();
+    expect(coordinator.isRunning).toBe(false);
+
+    // Release delay so in-flight recovery completes
+    releaseDelay();
+
+    const [sweepRes] = await Promise.all([sweepPromise, stopPromise]);
+
+    reassignSpy.mockRestore();
+
+    expect(coordinator.isRunning).toBe(false);
+    expect(sweepRes.ok).toBe(true);
+    if (sweepRes.ok) {
+      expect(sweepRes.value.reassignedCount).toBe(1);
+    }
+
+    // Verify task was reassigned cleanly
+    const run = await runRepo.findById(runId(rId));
+    const task = run?.tasks.find((t) => t.id === tId);
+    expect(task?.status).toBe("running");
+    expect(task?.workerId).toBe(workerId(wIdNew));
   });
 }
 
