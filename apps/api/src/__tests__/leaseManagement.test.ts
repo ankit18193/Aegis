@@ -2,6 +2,7 @@ import * as net from "node:net";
 
 import type { Run, Task } from "@aegis/contracts";
 import { runId, taskId, workerId, workflowId } from "@aegis/types";
+import { sql } from "drizzle-orm";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 
 import { createDatabaseContext, type DatabaseContext } from "../db/client.js";
@@ -82,6 +83,7 @@ function runLeaseLifecycleScenarios(getRepo: () => IRunRepository, prefix: strin
     expect(new Date(lease1.leaseUntil).getTime()).toBeGreaterThan(Date.now());
 
     // 2. Worker renews lease
+    await new Promise((r) => setTimeout(r, 15));
     const renewRes = await repo.renewTaskLease(
       taskId(tId),
       lease1.leaseId,
@@ -252,6 +254,10 @@ describe("Phase 12B: Worker Heartbeats & Lease Management E2E Integration", () =
       dbUrl = process.env["DATABASE_URL"] ?? "postgresql://postgres:postgres@localhost:5433/aegis";
       ctx = createDatabaseContext({ url: dbUrl, poolMin: 1, poolMax: 5 });
       await runMigrations(ctx.db);
+    });
+
+    beforeEach(async () => {
+      await ctx.db.execute(sql`TRUNCATE tasks, run_events, runs CASCADE`);
     });
 
     afterAll(async () => {

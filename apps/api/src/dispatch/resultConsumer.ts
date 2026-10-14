@@ -138,8 +138,8 @@ export class TaskResultConsumer {
       return false;
     }
 
-    // Lock 9: Late-result rejection
-    // If the task was reassigned to another worker, reject late results from superseded worker.
+    // Lock 6 & Lock 9: Late-result rejection and stale execution ownership
+    // 1. If the task was reassigned to another worker, reject late results from superseded worker.
     if (task.workerId && task.workerId !== workerId) {
       this.logger?.warn("Stale task result rejected: worker mismatch (task reassigned)", {
         taskId,
@@ -149,7 +149,27 @@ export class TaskResultConsumer {
       return false;
     }
 
-    // Reject results for tasks not currently in running state
+    // 2. Reject results if worker's lease was marked expired
+    if (task.leaseExpiredAt) {
+      this.logger?.warn("Stale task result rejected: task lease has already expired", {
+        taskId,
+        workerId,
+        leaseExpiredAt: task.leaseExpiredAt,
+      });
+      return false;
+    }
+
+    // 3. Reject results if worker's lease expired in wall-clock time
+    if (task.leaseUntil && new Date(task.leaseUntil).getTime() <= Date.now()) {
+      this.logger?.warn("Stale task result rejected: task lease expired before result ingestion", {
+        taskId,
+        workerId,
+        leaseUntil: task.leaseUntil,
+      });
+      return false;
+    }
+
+    // 4. Reject results for tasks not currently in running state
     if (task.status !== "running") {
       this.logger?.warn("Stale task result rejected: task is not in running state", {
         taskId,
