@@ -5,3 +5,4 @@ export * from "./assignmentPublisher.js";
 export * from "./dispatcher.js";
 export * from "./resultConsumer.js";
 export * from "./leaseMonitor.js";
+export * from "./recoveryCoordinator.js";
