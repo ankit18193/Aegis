@@ -10,6 +10,7 @@ let mockOverride: boolean | null = null;
  */
 export function setUseMockStream(useMock: boolean | null): void {
   mockOverride = useMock;
+  resetExecutionStreamClient();
 }
 
 /**
