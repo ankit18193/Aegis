@@ -14,9 +14,17 @@ export {
 } from "./stream/MockExecutionStreamClient";
 
 export {
+  SseExecutionStreamClient,
+  type SseExecutionStreamClientOptions,
+} from "./stream/SseExecutionStreamClient";
+
+export {
+  createDefaultStreamClient,
   getExecutionStreamClient,
+  isMockStreamEnabled,
   resetExecutionStreamClient,
   setExecutionStreamClient,
+  setUseMockStream,
 } from "./stream/streamClientService";
 
 export {

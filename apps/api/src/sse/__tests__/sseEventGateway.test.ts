@@ -146,6 +146,7 @@ function makeWritableConnection(
 ): { stream: MockWritable; connection: SseConnection } {
   const stream = new MockWritable();
   const connection = manager.createConnection(stream, { runId: runIdValue });
+  connection.open();
   return { stream, connection };
 }
 
