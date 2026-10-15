@@ -92,3 +92,4 @@ export * from "./outbox.js";
 export * from "./recovery.js";
 export * from "./sse.js";
 export * from "./sseSerializer.js";
+export * from "./sseAdapter.js";
