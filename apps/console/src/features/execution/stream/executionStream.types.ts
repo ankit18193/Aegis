@@ -17,6 +17,18 @@ export interface ExecutionStreamError {
   readonly message: string;
   readonly retryable?: boolean;
   readonly cause?: unknown;
+  readonly details?: Record<string, unknown>;
+  readonly reconcileRequired?: boolean;
+}
+
+/**
+ * Options supplied when subscribing to a real-time execution stream.
+ */
+export interface StreamSubscribeOptions {
+  /**
+   * Starting anchor event ID for historical replay / resumption.
+   */
+  readonly fromEventId?: string | undefined;
 }
 
 /**

@@ -20,8 +20,8 @@ import type { TaskSummary } from "../types";
 
 export const RunWorkspace: React.FC = () => {
   const { runId } = useParams<{ runId: string }>();
-  const { run: initialRun, isLoading: isRunLoading, error } = useRun(runId);
-  const { events: initialEvents, isLoading: isEventsLoading } = useRunEvents(runId);
+  const { run: initialRun, isLoading: isRunLoading, error, refetch: refetchRun } = useRun(runId);
+  const { events: initialEvents, isLoading: isEventsLoading, refetch: refetchEvents } = useRunEvents(runId);
 
   const {
     run: liveRun,
@@ -32,6 +32,9 @@ export const RunWorkspace: React.FC = () => {
     runId,
     initialRun,
     initialEvents,
+    onReconcile: async () => {
+      await Promise.all([refetchRun(), refetchEvents()]);
+    },
   });
 
   const run = liveRun ?? initialRun;

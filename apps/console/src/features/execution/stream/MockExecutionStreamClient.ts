@@ -6,6 +6,7 @@ import type {
   ExecutionStreamError,
   ExecutionStreamEvent,
   ExecutionStreamListener,
+  StreamSubscribeOptions,
   StreamSubscription,
 } from "./executionStream.types";
 import type { IExecutionStreamClient } from "./IExecutionStreamClient";
@@ -41,7 +42,11 @@ export class MockExecutionStreamClient implements IExecutionStreamClient {
   /**
    * Subscribes to real-time events for a specific execution run.
    */
-  public subscribe(runIdStr: string, listener: ExecutionStreamListener): StreamSubscription {
+  public subscribe(
+    runIdStr: string,
+    listener: ExecutionStreamListener,
+    _options?: StreamSubscribeOptions,
+  ): StreamSubscription {
     if (this.disposed) {
       throw new Error("Cannot subscribe to a disposed MockExecutionStreamClient");
     }

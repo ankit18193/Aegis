@@ -33,6 +33,12 @@ export interface UseExecutionStreamOptions {
    * Optional custom client override (defaults to getExecutionStreamClient()).
    */
   readonly client?: IExecutionStreamClient;
+
+  /**
+   * Optional authoritative state reconciliation callback (e.g. refetch from REST API).
+   * Automatically triggered when stream errors indicate reconcileRequired.
+   */
+  readonly onReconcile?: ((runId: string) => Promise<void>) | undefined;
 }
 
 export interface UseExecutionStreamResult {
@@ -60,6 +66,16 @@ export interface UseExecutionStreamResult {
    * The active stream client instance.
    */
   readonly client: IExecutionStreamClient;
+
+  /**
+   * Manually triggers the authoritative state reconciliation callback.
+   */
+  readonly reconcile: () => Promise<void>;
+
+  /**
+   * Directly reconciles the internal state with an authoritative snapshot.
+   */
+  readonly reconcileState: (run: Run, events?: RunEvent[]) => void;
 }
 
 const EMPTY_EVENTS: readonly RunEvent[] = [];
@@ -67,7 +83,8 @@ const EMPTY_EVENTS: readonly RunEvent[] = [];
 /**
  * React hook connecting an execution run to the stream client abstraction.
  * Dispatches incoming stream events to the reducer, provides connection status,
- * and deterministically cleans up subscriptions when navigating or unmounting.
+ * triggers authoritative state reconciliation on gap/overflow, and deterministically
+ * cleans up subscriptions when navigating or unmounting.
  */
 export function useExecutionStream(
   options: UseExecutionStreamOptions,
@@ -77,6 +94,7 @@ export function useExecutionStream(
     initialRun = null,
     initialEvents = EMPTY_EVENTS,
     client = getExecutionStreamClient(),
+    onReconcile,
   } = options;
 
   const [state, dispatch] = React.useReducer(reduceExecutionState, initialExecutionState);
@@ -106,6 +124,25 @@ export function useExecutionStream(
     }
   }, [runId, initialRun, initialEvents]);
 
+  const handleReconcile = React.useCallback(async () => {
+    if (!runId || !onReconcile) return;
+    try {
+      await onReconcile(runId);
+    } catch {
+      // Authoritative reconciliation failure is handled by caller
+    }
+  }, [runId, onReconcile]);
+
+  const reconcileState = React.useCallback((run: Run, events?: RunEvent[]) => {
+    dispatch({
+      type: "RECONCILE_STATE",
+      payload: {
+        run,
+        reconciledEvents: events,
+      },
+    });
+  }, []);
+
   // Manage run-scoped subscription lifecycle
   React.useEffect(() => {
     if (!runId) {
@@ -126,13 +163,16 @@ export function useExecutionStream(
       },
       onError: (streamErr: ExecutionStreamError) => {
         setError(streamErr);
+        if (streamErr.reconcileRequired) {
+          void handleReconcile();
+        }
       },
     });
 
     return () => {
       subscription.unsubscribe();
     };
-  }, [runId, client]);
+  }, [runId, client, handleReconcile]);
 
   // Fall back to initialRun if reducer has not yet processed an INIT_RUN
   const effectiveRun = state.run ?? initialRun;
@@ -144,5 +184,7 @@ export function useExecutionStream(
     connectionState,
     error,
     client,
+    reconcile: handleReconcile,
+    reconcileState,
   };
 }

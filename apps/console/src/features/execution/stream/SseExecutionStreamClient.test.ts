@@ -465,6 +465,101 @@ describe("SseExecutionStreamClient", () => {
       expect(instances[0]?.readyState).toBe(MockEventSource.CLOSED);
       expect(client.getActiveSessionCount()).toBe(0);
     });
+
+    it("marks stream error as reconcileRequired when BUFFER_OVERFLOW or REPLAY_GAP_DETECTED is received", () => {
+      const { client, instances } = createTestClient();
+      const errors: ExecutionStreamError[] = [];
+
+      client.subscribe("run-1", {
+        onEvent: vi.fn(),
+        onError: (err) => errors.push(err),
+      });
+
+      const overflowEnv = createSseErrorEnvelope({
+        id: eventId("err-buf-overflow"),
+        code: "BUFFER_OVERFLOW",
+        message: "Buffer overflow: Replay buffer exceeded 500 events",
+        retryable: false,
+        runId: runId("run-1"),
+        details: { reconcileRequired: true },
+      });
+
+      instances[0]?.simulateError({ data: JSON.stringify(overflowEnv) });
+
+      expect(errors).toHaveLength(1);
+      expect(errors[0]?.code).toBe("BUFFER_OVERFLOW");
+      expect(errors[0]?.reconcileRequired).toBe(true);
+    });
+
+    it("marks stream error as reconcileRequired when REPLAY_GAP_DETECTED is received", () => {
+      const { client, instances } = createTestClient();
+      const errors: ExecutionStreamError[] = [];
+
+      client.subscribe("run-gap", {
+        onEvent: vi.fn(),
+        onError: (err) => errors.push(err),
+      });
+
+      const gapEnv = createSseErrorEnvelope({
+        id: eventId("err-gap"),
+        code: "REPLAY_GAP_DETECTED",
+        message: "Replay gap detected: Unknown cursor position",
+        retryable: false,
+        runId: runId("run-gap"),
+      });
+
+      instances[0]?.simulateError({ data: JSON.stringify(gapEnv) });
+
+      expect(errors).toHaveLength(1);
+      expect(errors[0]?.code).toBe("REPLAY_GAP_DETECTED");
+      expect(errors[0]?.reconcileRequired).toBe(true);
+    });
+  });
+
+  describe("Reconnection Cursors & Resume Protocols", () => {
+    it("appends lastEventId to stream URL when fromEventId is provided in subscribe options", () => {
+      const { client, instances } = createTestClient();
+      client.subscribe("run-resume-1", { onEvent: vi.fn() }, { fromEventId: "evt-anchor-42" });
+
+      expect(instances).toHaveLength(1);
+      expect(instances[0]?.url).toBe(
+        "http://localhost:3001/api/v1/stream/transport?runId=run-resume-1&lastEventId=evt-anchor-42",
+      );
+      expect(client.getLastEventId("run-resume-1")).toBe("evt-anchor-42");
+    });
+
+    it("tracks latest received event ID and supplies it for subsequent session reconnects", () => {
+      const { client, instances } = createTestClient();
+      const sub = client.subscribe("run-resume-2", { onEvent: vi.fn() });
+
+      const domainEvent = createSampleRunEvent("run-resume-2", "evt-last-seen-99");
+      instances[0]?.simulateNamedEvent("execution", JSON.stringify(createSseExecutionEnvelope(domainEvent)));
+
+      expect(client.getLastEventId("run-resume-2")).toBe("evt-last-seen-99");
+
+      // Unsubscribe closing session
+      sub.unsubscribe();
+      expect(client.getActiveSessionCount()).toBe(0);
+
+      // Re-subscribe without options uses the tracked latest event ID
+      client.subscribe("run-resume-2", { onEvent: vi.fn() });
+      expect(instances).toHaveLength(2);
+      expect(instances[1]?.url).toBe(
+        "http://localhost:3001/api/v1/stream/transport?runId=run-resume-2&lastEventId=evt-last-seen-99",
+      );
+    });
+
+    it("allows explicitly setting and clearing the recorded lastEventId", () => {
+      const { client } = createTestClient();
+
+      expect(client.getLastEventId("run-manual")).toBeUndefined();
+
+      client.setLastEventId("run-manual", "evt-initial-rest-100");
+      expect(client.getLastEventId("run-manual")).toBe("evt-initial-rest-100");
+
+      client.clearLastEventId("run-manual");
+      expect(client.getLastEventId("run-manual")).toBeUndefined();
+    });
   });
 
   describe("Disposal & Cleanup", () => {

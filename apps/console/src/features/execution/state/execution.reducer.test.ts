@@ -373,4 +373,93 @@ describe("Execution State Model & Event Reducer", () => {
     expect(stateA.seenEventIds).toEqual(stateB.seenEventIds);
     expect(stateA.lastEventTimestamp).toEqual(stateB.lastEventTimestamp);
   });
+
+  describe("RECONCILE_STATE Action & State Recovery", () => {
+    it("merges authoritative run snapshot and deduplicates reconciled events with seen events", () => {
+      const initialRun = createMockRun("run-rec", "running");
+      const evt1 = createEvent("evt-1", "workflow_started", { timestamp: "2026-10-15T00:00:01.000Z" });
+
+      let state = reduceExecutionState(initialExecutionState, {
+        type: "INIT_RUN",
+        payload: { run: initialRun, initialEvents: [evt1] },
+      });
+
+      const updatedRun: Run = {
+        ...initialRun,
+        status: "running",
+        progress: 75,
+      };
+
+      // Reconciled events containing evt-1 (duplicate) and evt-2 (new)
+      const evt2 = createEvent("evt-2", "task_completed", {
+        taskIdStr: "task-1",
+        timestamp: "2026-10-15T00:00:05.000Z",
+      });
+
+      state = reduceExecutionState(state, {
+        type: "RECONCILE_STATE",
+        payload: {
+          run: updatedRun,
+          reconciledEvents: [evt1, evt2],
+        },
+      });
+
+      expect(state.run?.progress).toBe(75);
+      expect(state.events).toHaveLength(2);
+      expect(state.events[0]?.id).toBe("evt-1");
+      expect(state.events[1]?.id).toBe("evt-2");
+      expect(state.seenEventIds.has("evt-1")).toBe(true);
+      expect(state.seenEventIds.has("evt-2")).toBe(true);
+      expect(state.lastEventTimestamp).toBe("2026-10-15T00:00:05.000Z");
+    });
+
+    it("sorts merged events chronologically even if arrived out-of-order", () => {
+      const run = createMockRun("run-rec-order");
+      const evt2 = createEvent("evt-2", "task_started", { timestamp: "2026-10-15T00:00:05.000Z" });
+
+      let state = reduceExecutionState(initialExecutionState, {
+        type: "INIT_RUN",
+        payload: { run, initialEvents: [evt2] },
+      });
+
+      // Older event arrived during reconciliation
+      const evt1 = createEvent("evt-1", "workflow_started", { timestamp: "2026-10-15T00:00:01.000Z" });
+
+      state = reduceExecutionState(state, {
+        type: "RECONCILE_STATE",
+        payload: {
+          run,
+          reconciledEvents: [evt1],
+        },
+      });
+
+      expect(state.events).toHaveLength(2);
+      expect(state.events[0]?.id).toBe("evt-1");
+      expect(state.events[1]?.id).toBe("evt-2");
+    });
+
+    it("protects terminal run status from regressing during RECONCILE_STATE", () => {
+      const completedRun = createMockRun("run-term", "completed");
+      let state = reduceExecutionState(initialExecutionState, {
+        type: "INIT_RUN",
+        payload: { run: completedRun },
+      });
+
+      // Stale snapshot with "running" status arrives
+      const staleSnapshot: Run = {
+        ...completedRun,
+        status: "running",
+      };
+
+      state = reduceExecutionState(state, {
+        type: "RECONCILE_STATE",
+        payload: {
+          run: staleSnapshot,
+        },
+      });
+
+      expect(state.run?.status).toBe("completed"); // Must remain completed
+    });
+  });
 });
+

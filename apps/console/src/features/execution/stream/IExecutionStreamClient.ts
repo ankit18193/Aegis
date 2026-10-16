@@ -1,6 +1,7 @@
 import type {
   ConnectionState,
   ExecutionStreamListener,
+  StreamSubscribeOptions,
   StreamSubscription,
 } from "./executionStream.types";
 
@@ -16,9 +17,14 @@ export interface IExecutionStreamClient {
    *
    * @param runId The ID of the execution run to stream.
    * @param listener Callback handlers for events, connection state changes, and errors.
+   * @param options Optional subscription options, including anchor cursor event ID.
    * @returns A deterministic StreamSubscription object with an idempotent unsubscribe method.
    */
-  subscribe(runId: string, listener: ExecutionStreamListener): StreamSubscription;
+  subscribe(
+    runId: string,
+    listener: ExecutionStreamListener,
+    options?: StreamSubscribeOptions,
+  ): StreamSubscription;
 
   /**
    * Returns the current connection state of the stream client.

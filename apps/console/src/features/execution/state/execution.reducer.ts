@@ -58,6 +58,13 @@ export type ExecutionAction =
       payload: RunEvent;
     }
   | {
+      type: "RECONCILE_STATE";
+      payload: {
+        run: Run;
+        reconciledEvents?: RunEvent[];
+      };
+    }
+  | {
       type: "RESET";
     };
 
@@ -229,6 +236,38 @@ export function reduceExecutionState(
 
     case "RESET": {
       return initialExecutionState;
+    }
+
+    case "RECONCILE_STATE": {
+      const incomingRun = action.payload.run;
+      const reconciledEvents = action.payload.reconciledEvents ?? [];
+      const nextSeen = new Set<string>(state.seenEventIds);
+      const mergedEvents = [...state.events];
+
+      for (const ev of reconciledEvents) {
+        if (ev.id && !nextSeen.has(ev.id)) {
+          nextSeen.add(ev.id);
+          mergedEvents.push(ev);
+        }
+      }
+
+      // Chronological sort
+      mergedEvents.sort((a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime());
+
+      // Terminal state protection: if state.run is already in terminal state, don't revert to non-terminal
+      const effectiveRun =
+        state.run && TERMINAL_RUN_STATUSES.has(state.run.status) && !TERMINAL_RUN_STATUSES.has(incomingRun.status)
+          ? state.run
+          : incomingRun;
+
+      const lastEvt = mergedEvents[mergedEvents.length - 1];
+
+      return {
+        run: effectiveRun,
+        events: mergedEvents,
+        seenEventIds: nextSeen,
+        lastEventTimestamp: lastEvt?.timestamp ?? effectiveRun.updatedAt,
+      };
     }
 
     case "STREAM_EVENT": {

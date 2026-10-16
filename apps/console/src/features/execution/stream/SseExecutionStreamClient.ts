@@ -24,6 +24,7 @@ import type {
   ExecutionStreamError,
   ExecutionStreamEvent,
   ExecutionStreamListener,
+  StreamSubscribeOptions,
   StreamSubscription,
 } from "./executionStream.types";
 import type { IExecutionStreamClient } from "./IExecutionStreamClient";
@@ -92,6 +93,7 @@ export class SseExecutionStreamClient implements IExecutionStreamClient {
   private readonly initialConnectionState: ConnectionState;
 
   private readonly sessions = new Map<string, RunStreamSession>();
+  private readonly latestEventIds = new Map<string, string>();
   private disposed = false;
 
   constructor(options: SseExecutionStreamClientOptions = {}) {
@@ -154,13 +156,21 @@ export class SseExecutionStreamClient implements IExecutionStreamClient {
    * Subscribes to real-time execution events for a specific run ID.
    * Multiple subscriptions to the same runId share a single EventSource stream.
    */
-  public subscribe(runIdStr: string, listener: ExecutionStreamListener): StreamSubscription {
+  public subscribe(
+    runIdStr: string,
+    listener: ExecutionStreamListener,
+    options?: StreamSubscribeOptions,
+  ): StreamSubscription {
     if (this.disposed) {
       throw new Error("Cannot subscribe to a disposed SseExecutionStreamClient");
     }
 
     if (!runIdStr || typeof runIdStr !== "string" || runIdStr.trim().length === 0) {
       throw new Error("runId must be a non-empty string");
+    }
+
+    if (options?.fromEventId) {
+      this.latestEventIds.set(runIdStr, options.fromEventId);
     }
 
     let session = this.sessions.get(runIdStr);
@@ -173,7 +183,7 @@ export class SseExecutionStreamClient implements IExecutionStreamClient {
         listener.onError?.(session.lastError);
       }
     } else {
-      session = this.createSession(runIdStr);
+      session = this.createSession(runIdStr, options?.fromEventId);
       this.sessions.set(runIdStr, session);
       session.subscribers.add(listener);
       // Notify initial connecting state
@@ -239,22 +249,47 @@ export class SseExecutionStreamClient implements IExecutionStreamClient {
     return this.sessions.get(runIdStr)?.connectionState;
   }
 
+  /**
+   * Returns the latest seen event ID for a given run ID.
+   */
+  public getLastEventId(runIdStr: string): string | undefined {
+    return this.latestEventIds.get(runIdStr);
+  }
+
+  /**
+   * Sets the latest known event ID for a run ID (e.g. from initial REST payload).
+   */
+  public setLastEventId(runIdStr: string, evtId: string): void {
+    this.latestEventIds.set(runIdStr, evtId);
+  }
+
+  /**
+   * Clears the recorded latest event ID for a run ID.
+   */
+  public clearLastEventId(runIdStr: string): void {
+    this.latestEventIds.delete(runIdStr);
+  }
+
   // ─────────────────────────────────────────────────────────────────────────
   // Private Session & EventSource Management
   // ─────────────────────────────────────────────────────────────────────────
 
-  private buildStreamUrl(runIdStr: string): string {
+  private buildStreamUrl(runIdStr: string, cursor?: string): string {
     const normalizedBase = this.baseUrl.endsWith("/") ? this.baseUrl.slice(0, -1) : this.baseUrl;
     const normalizedPath = this.endpointPath.startsWith("/")
       ? this.endpointPath
       : `/${this.endpointPath}`;
     const url = new URL(`${normalizedBase}${normalizedPath}`);
     url.searchParams.set("runId", runIdStr);
+    const cursorToUse = cursor ?? this.latestEventIds.get(runIdStr);
+    if (cursorToUse) {
+      url.searchParams.set("lastEventId", cursorToUse);
+    }
     return url.toString();
   }
 
-  private createSession(runIdStr: string): RunStreamSession {
-    const streamUrl = this.buildStreamUrl(runIdStr);
+  private createSession(runIdStr: string, cursor?: string): RunStreamSession {
+    const streamUrl = this.buildStreamUrl(runIdStr, cursor);
     const eventSource = this.eventSourceFactory(streamUrl, {
       withCredentials: this.withCredentials,
     });
@@ -374,6 +409,8 @@ export class SseExecutionStreamClient implements IExecutionStreamClient {
     }
 
     session.seenEventIds.add(envelope.id);
+    this.latestEventIds.set(session.runId, envelope.id);
+
     if (session.seenEventIds.size > MAX_SEEN_CACHE_SIZE) {
       const oldestId = session.seenEventIds.values().next().value;
       if (oldestId) {
@@ -419,10 +456,18 @@ export class SseExecutionStreamClient implements IExecutionStreamClient {
       const parseRes = deserializeSseEnvelope({ data: messageEvent.data });
       if (parseRes.ok && parseRes.value.type === "error") {
         const payload = parseRes.value.payload;
+        const detailsObj = payload.details;
+        const isReconcileRequired =
+          payload.code === "BUFFER_OVERFLOW" ||
+          payload.code === "REPLAY_GAP_DETECTED" ||
+          Boolean(detailsObj?.reconcileRequired);
+
         const streamErr: ExecutionStreamError = {
           code: payload.code,
           message: payload.message,
           retryable: payload.retryable,
+          details: payload.details,
+          reconcileRequired: isReconcileRequired,
         };
 
         session.connectionState = "error";

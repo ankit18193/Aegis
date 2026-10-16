@@ -1,7 +1,7 @@
 import type { Run, Task } from "@aegis/contracts";
 import { eventId, runId, taskId, workflowId } from "@aegis/types";
 import { act, renderHook } from "@testing-library/react";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import { MockExecutionStreamClient } from "../stream/MockExecutionStreamClient";
 
@@ -214,4 +214,119 @@ describe("useExecutionStream Hook", () => {
     expect(result.current.events[0]?.id).toBe("evt-new-B");
     expect(result.current.run?.tasks[0]?.status).toBe("running");
   });
+
+  describe("Authoritative Reconciliation & State Recovery", () => {
+    it("automatically triggers onReconcile callback when stream error has reconcileRequired set to true", () => {
+      const client = new MockExecutionStreamClient();
+      const run = createTestRun("run-rec-1");
+      const onReconcileMock = vi.fn().mockResolvedValue(undefined);
+
+      renderHook(() =>
+        useExecutionStream({
+          runId: "run-rec-1",
+          initialRun: run,
+          client,
+          onReconcile: onReconcileMock,
+        }),
+      );
+
+      act(() => {
+        client.emitError("run-rec-1", {
+          code: "BUFFER_OVERFLOW",
+          message: "Buffer limit exceeded",
+          reconcileRequired: true,
+        });
+      });
+
+      expect(onReconcileMock).toHaveBeenCalledTimes(1);
+      expect(onReconcileMock).toHaveBeenCalledWith("run-rec-1");
+    });
+
+    it("does not trigger onReconcile when error has reconcileRequired set to false or undefined", () => {
+      const client = new MockExecutionStreamClient();
+      const run = createTestRun("run-rec-2");
+      const onReconcileMock = vi.fn().mockResolvedValue(undefined);
+
+      renderHook(() =>
+        useExecutionStream({
+          runId: "run-rec-2",
+          initialRun: run,
+          client,
+          onReconcile: onReconcileMock,
+        }),
+      );
+
+      act(() => {
+        client.emitError("run-rec-2", {
+          code: "STREAM_INTERRUPTED",
+          message: "Transient disconnect",
+          reconcileRequired: false,
+        });
+      });
+
+      expect(onReconcileMock).not.toHaveBeenCalled();
+    });
+
+    it("allows manual reconciliation invocation via result.reconcile()", async () => {
+      const client = new MockExecutionStreamClient();
+      const run = createTestRun("run-rec-3");
+      const onReconcileMock = vi.fn().mockResolvedValue(undefined);
+
+      const { result } = renderHook(() =>
+        useExecutionStream({
+          runId: "run-rec-3",
+          initialRun: run,
+          client,
+          onReconcile: onReconcileMock,
+        }),
+      );
+
+      await act(async () => {
+        await result.current.reconcile();
+      });
+
+      expect(onReconcileMock).toHaveBeenCalledTimes(1);
+      expect(onReconcileMock).toHaveBeenCalledWith("run-rec-3");
+    });
+
+    it("updates reducer state directly when reconcileState is called", () => {
+      const client = new MockExecutionStreamClient();
+      const run = createTestRun("run-rec-4");
+
+      const { result } = renderHook(() =>
+        useExecutionStream({
+          runId: "run-rec-4",
+          initialRun: run,
+          client,
+        }),
+      );
+
+      const updatedRun: Run = {
+        ...run,
+        status: "running",
+        progress: 50,
+      };
+
+      const newEvents = [
+        {
+          id: eventId("evt-rec-1"),
+          runId: runId("run-rec-4"),
+          type: "task_started" as const,
+          severity: "info" as const,
+          timestamp: "2026-10-15T00:05:00.000Z",
+          message: "Task running",
+        },
+      ];
+
+      act(() => {
+        result.current.reconcileState(updatedRun, newEvents);
+      });
+
+      expect(result.current.run?.status).toBe("running");
+      expect(result.current.run?.progress).toBe(50);
+      expect(result.current.events).toHaveLength(1);
+      expect(result.current.events[0]?.id).toBe("evt-rec-1");
+    });
+  });
 });
+
