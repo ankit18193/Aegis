@@ -104,6 +104,7 @@ export function useExecutionStream(
   const [error, setError] = React.useState<ExecutionStreamError | null>(null);
 
   const lastInitializedRunIdRef = React.useRef<string | null>(null);
+  const isReconcilingRef = React.useRef(false);
 
   // Initialize or re-sync state when initialRun arrives or changes
   React.useEffect(() => {
@@ -121,15 +122,22 @@ export function useExecutionStream(
     } else if (!runId) {
       lastInitializedRunIdRef.current = null;
       dispatch({ type: "RESET" });
+    } else if (lastInitializedRunIdRef.current !== runId) {
+      // Switched to a different run whose initialRun has not loaded yet
+      lastInitializedRunIdRef.current = null;
+      dispatch({ type: "RESET" });
     }
   }, [runId, initialRun, initialEvents]);
 
   const handleReconcile = React.useCallback(async () => {
     if (!runId || !onReconcile) return;
+    isReconcilingRef.current = true;
     try {
       await onReconcile(runId);
     } catch {
       // Authoritative reconciliation failure is handled by caller
+    } finally {
+      isReconcilingRef.current = false;
     }
   }, [runId, onReconcile]);
 
@@ -163,7 +171,7 @@ export function useExecutionStream(
       },
       onError: (streamErr: ExecutionStreamError) => {
         setError(streamErr);
-        if (streamErr.reconcileRequired) {
+        if (streamErr.reconcileRequired && !isReconcilingRef.current) {
           void handleReconcile();
         }
       },

@@ -244,5 +244,100 @@ describe("Console Durable Replay & State Recovery Integration Suite (Phase 13D)"
       expect(hookRef.result.current.run?.status).toBe("completed");
       expect(hookRef.result.current.run?.progress).toBe(100);
     });
+
+    it("guards against concurrent duplicate reconciliation invocations", async () => {
+      const client = new MockExecutionStreamClient();
+      const initialRun = createTestRun("run-dedup-rec");
+
+      let resolveReconcile: (() => void) | null = null;
+      const reconcilePromise = new Promise<void>((res) => {
+        resolveReconcile = res;
+      });
+
+      const onReconcileMock = vi.fn().mockReturnValue(reconcilePromise);
+
+      renderHook(() =>
+        useExecutionStream({
+          runId: "run-dedup-rec",
+          initialRun,
+          client,
+          onReconcile: onReconcileMock,
+        }),
+      );
+
+      // Emit two rapid errors with reconcileRequired
+      act(() => {
+        client.emitError("run-dedup-rec", {
+          code: "BUFFER_OVERFLOW",
+          message: "Buffer overflow",
+          reconcileRequired: true,
+        });
+        client.emitError("run-dedup-rec", {
+          code: "REPLAY_GAP_DETECTED",
+          message: "Replay gap",
+          reconcileRequired: true,
+        });
+      });
+
+      // Should only invoke onReconcile once due to in-flight guard
+      expect(onReconcileMock).toHaveBeenCalledTimes(1);
+
+      // Resolve the in-flight reconciliation
+      await act(async () => {
+        resolveReconcile?.();
+        await Promise.resolve();
+      });
+    });
+
+    it("resets state cleanly when switching active runId without leaking past run events", () => {
+      const client = new MockExecutionStreamClient();
+      const runA = createTestRun("run-switch-A");
+      const runB = createTestRun("run-switch-B");
+
+      interface SwitchProps {
+        rId: string;
+        rObj: Run | null;
+      }
+      const initialProps: SwitchProps = { rId: "run-switch-A", rObj: runA };
+
+      const { result, rerender } = renderHook(
+        (props: SwitchProps) =>
+          useExecutionStream({
+            runId: props.rId,
+            initialRun: props.rObj,
+            client,
+          }),
+        { initialProps },
+      );
+
+      // Emit event for run A
+      act(() => {
+        client.emitEvent("run-switch-A", {
+          id: eventId("evt-A-1"),
+          runId: runId("run-switch-A"),
+          type: "task_started",
+          severity: "info",
+          timestamp: "2026-10-15T00:00:01.000Z",
+          message: "Task 1 started on A",
+          taskId: taskId("task-run-switch-A-1"),
+        });
+      });
+
+      expect(result.current.events).toHaveLength(1);
+      expect(result.current.events[0]?.id).toBe("evt-A-1");
+
+      // Switch to run B while its initialRun is still pending/null
+      rerender({ rId: "run-switch-B", rObj: null });
+
+      // State must be cleanly reset immediately
+      expect(result.current.events).toHaveLength(0);
+      expect(result.current.run).toBeNull();
+
+      // Now initialRun for run B resolves
+      rerender({ rId: "run-switch-B", rObj: runB });
+      expect(result.current.run?.id).toBe("run-switch-B");
+      expect(result.current.events).toHaveLength(0);
+    });
   });
 });
+

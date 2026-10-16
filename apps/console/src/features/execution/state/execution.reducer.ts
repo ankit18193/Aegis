@@ -254,11 +254,38 @@ export function reduceExecutionState(
       // Chronological sort
       mergedEvents.sort((a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime());
 
+      // Task-level terminal state monotonicity:
+      // If a task in state.run has already reached a terminal state, don't let a stale
+      // incoming snapshot revert it back to a non-terminal state.
+      const reconciledTasks = incomingRun.tasks.map((incTask) => {
+        const curTask = state.run?.tasks.find((t) => t.id === incTask.id);
+        if (
+          curTask &&
+          TERMINAL_TASK_STATUSES.has(curTask.status) &&
+          !TERMINAL_TASK_STATUSES.has(incTask.status)
+        ) {
+          return curTask;
+        }
+        return incTask;
+      });
+
       // Terminal state protection: if state.run is already in terminal state, don't revert to non-terminal
-      const effectiveRun =
-        state.run && TERMINAL_RUN_STATUSES.has(state.run.status) && !TERMINAL_RUN_STATUSES.has(incomingRun.status)
-          ? state.run
-          : incomingRun;
+      const effectiveRunStatus =
+        state.run &&
+        TERMINAL_RUN_STATUSES.has(state.run.status) &&
+        !TERMINAL_RUN_STATUSES.has(incomingRun.status)
+          ? state.run.status
+          : incomingRun.status;
+
+      const effectiveRun: Run = {
+        ...incomingRun,
+        status: effectiveRunStatus,
+        tasks: reconciledTasks,
+        progress:
+          effectiveRunStatus === "completed"
+            ? 100
+            : incomingRun.progress,
+      };
 
       const lastEvt = mergedEvents[mergedEvents.length - 1];
 
@@ -272,6 +299,11 @@ export function reduceExecutionState(
 
     case "STREAM_EVENT": {
       const event = action.payload;
+
+      // Reject cross-run events if state.run is set
+      if (event.runId && state.run && state.run.id !== event.runId) {
+        return state;
+      }
 
       // Deduplication: reject if event ID was already processed
       if (event.id && state.seenEventIds.has(event.id)) {

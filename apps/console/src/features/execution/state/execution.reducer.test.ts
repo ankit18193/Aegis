@@ -229,7 +229,7 @@ describe("Execution State Model & Event Reducer", () => {
   });
 
   it("handles lease expiration and task reassignment metadata", () => {
-    const run = createMockRun("run-reassign");
+    const run = createMockRun();
     let state = reduceExecutionState(initialExecutionState, {
       type: "INIT_RUN",
       payload: { run },
@@ -460,6 +460,66 @@ describe("Execution State Model & Event Reducer", () => {
 
       expect(state.run?.status).toBe("completed"); // Must remain completed
     });
+
+    it("protects terminal task status from regressing during RECONCILE_STATE", () => {
+      const run = createMockRun("run-term-task", "running");
+      const firstTask = run.tasks[0];
+      const secondTask = run.tasks[1];
+      expect(firstTask).toBeDefined();
+      expect(secondTask).toBeDefined();
+      if (!firstTask || !secondTask) return;
+
+      const completedTask = { ...firstTask, status: "completed" as const };
+      const runWithCompletedTask: Run = {
+        ...run,
+        tasks: [completedTask, secondTask],
+      };
+
+      let state = reduceExecutionState(initialExecutionState, {
+        type: "INIT_RUN",
+        payload: { run: runWithCompletedTask },
+      });
+
+      // Stale snapshot with task 0 still "running"
+      const staleSnapshot: Run = {
+        ...runWithCompletedTask,
+        tasks: [
+          { ...completedTask, status: "running" as const },
+          secondTask,
+        ],
+      };
+
+      state = reduceExecutionState(state, {
+        type: "RECONCILE_STATE",
+        payload: {
+          run: staleSnapshot,
+        },
+      });
+
+      expect(state.run?.tasks[0]?.status).toBe("completed");
+    });
+
+    it("rejects STREAM_EVENT belonging to a different runId", () => {
+      const run = createMockRun("run-alpha");
+      let state = reduceExecutionState(initialExecutionState, {
+        type: "INIT_RUN",
+        payload: { run },
+      });
+
+      // Event for run-beta arrives
+      state = reduceExecutionState(state, {
+        type: "STREAM_EVENT",
+        payload: createEvent("evt-cross", "task_started", {
+          runIdStr: "run-beta",
+          taskIdStr: "task-1",
+        }),
+      });
+
+      expect(state.events).toHaveLength(0);
+      expect(state.seenEventIds.has("evt-cross")).toBe(false);
+      expect(state.run?.tasks[0]?.status).toBe("pending");
+    });
   });
 });
+
 

@@ -560,6 +560,19 @@ describe("SseExecutionStreamClient", () => {
       client.clearLastEventId("run-manual");
       expect(client.getLastEventId("run-manual")).toBeUndefined();
     });
+
+    it("discards incoming execution events belonging to another run without advancing cursor", () => {
+      const { client, instances } = createTestClient();
+      const onEventMock = vi.fn();
+      client.subscribe("run-target", { onEvent: onEventMock });
+
+      // Simulate envelope with run-alien event
+      const foreignEvent = createSampleRunEvent("run-alien", "evt-alien-1");
+      instances[0]?.simulateNamedEvent("execution", JSON.stringify(createSseExecutionEnvelope(foreignEvent)));
+
+      expect(onEventMock).not.toHaveBeenCalled();
+      expect(client.getLastEventId("run-target")).toBeUndefined();
+    });
   });
 
   describe("Disposal & Cleanup", () => {

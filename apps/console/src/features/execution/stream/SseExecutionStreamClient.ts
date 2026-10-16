@@ -408,6 +408,13 @@ export class SseExecutionStreamClient implements IExecutionStreamClient {
       return;
     }
 
+    const runEvent: ExecutionStreamEvent = envelope.payload;
+
+    // Enforce stream isolation: drop event if it explicitly belongs to another run
+    if (runEvent.runId && runEvent.runId !== session.runId) {
+      return;
+    }
+
     session.seenEventIds.add(envelope.id);
     this.latestEventIds.set(session.runId, envelope.id);
 
@@ -418,7 +425,6 @@ export class SseExecutionStreamClient implements IExecutionStreamClient {
       }
     }
 
-    const runEvent: ExecutionStreamEvent = envelope.payload;
     for (const sub of session.subscribers) {
       try {
         sub.onEvent(runEvent);
