@@ -153,19 +153,32 @@ export class SseConnection implements ISseConnection {
       });
     }
 
-    const itemsToDrain = [...this.replayBuffer];
-    this.replayBuffer.length = 0;
     let drainedCount = 0;
 
-    for (const envelope of itemsToDrain) {
-      if (filterPredicate && !filterPredicate(envelope)) {
-        continue;
+    // Concurrency hardening: loop until replayBuffer is fully drained, accounting for
+    // concurrent events that arrive via sendEnvelope while earlier buffered batches are written.
+    while (this.replayBuffer.length > 0) {
+      if (this.hasBufferOverflowed()) {
+        this.clearBuffer();
+        return err({
+          code: "BUFFER_OVERFLOW",
+          message: `SSE replay buffer overflowed during drain on connection '${this.connectionId}'.`,
+        });
       }
-      const writeRes = await this.sendDirectEnvelope(envelope);
-      if (!writeRes.ok) {
-        return writeRes;
+
+      const itemsToDrain = [...this.replayBuffer];
+      this.replayBuffer.length = 0;
+
+      for (const envelope of itemsToDrain) {
+        if (filterPredicate && !filterPredicate(envelope)) {
+          continue;
+        }
+        const writeRes = await this.sendDirectEnvelope(envelope);
+        if (!writeRes.ok) {
+          return writeRes;
+        }
+        drainedCount += 1;
       }
-      drainedCount += 1;
     }
 
     return ok(drainedCount);

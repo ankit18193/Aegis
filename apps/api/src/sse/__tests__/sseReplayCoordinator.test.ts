@@ -302,4 +302,164 @@ describe("SseReplayCoordinator (Phase 13D — Commit 3)", () => {
       expect(connection.isBuffering).toBe(false);
     });
   });
+
+  describe("Concurrency Hardening (Phase 13E — Commit 2)", () => {
+    it("deduplicates concurrent coordinateReplay calls on the same connection", async () => {
+      const e1 = makeRunEvent(1, "2026-10-15T10:00:01.000Z");
+      const e2 = makeRunEvent(2, "2026-10-15T10:00:02.000Z");
+      repository.setEvents(runId("run-coord-1"), [e1, e2]);
+
+      // Launch two coordinateReplay calls concurrently for the same connection
+      const [res1, res2] = await Promise.all([
+        coordinator.coordinateReplay(connection, { runId: "run-coord-1" }),
+        coordinator.coordinateReplay(connection, { runId: "run-coord-1" }),
+      ]);
+
+      expect(res1.success).toBe(true);
+      expect(res2.success).toBe(true);
+      expect(res1.replayedCount).toBe(2);
+      expect(res2.replayedCount).toBe(2);
+
+      // Verify stream chunks were not doubled
+      expect(stream.writtenChunks).toHaveLength(2);
+    });
+
+    it("drains events that arrive concurrently while drainBuffer is flushing", async () => {
+      const e1 = makeRunEvent(1, "2026-10-15T10:00:01.000Z");
+      repository.setEvents(runId("run-coord-1"), [e1]);
+
+      connection.enableBuffering(10);
+
+      // Seed buffer with event 2
+      const e2 = makeRunEvent(2, "2026-10-15T10:00:02.000Z");
+      await connection.sendEnvelope(createSseExecutionEnvelope(e2));
+
+      // When event 2 is written during drain, simulate live event 3 arriving concurrently
+      const e3 = makeRunEvent(3, "2026-10-15T10:00:03.000Z");
+      let injected = false;
+      const originalWrite = stream._write.bind(stream);
+      stream._write = (chunk, encoding, callback) => {
+        const text = typeof chunk === "string" ? chunk : chunk.toString("utf8");
+        if (!injected && text.includes('"id":"evt-002"')) {
+          injected = true;
+          // Concurrent arrival into connection while draining
+          void connection.sendEnvelope(createSseExecutionEnvelope(e3));
+        }
+        originalWrite(chunk, encoding, callback);
+      };
+
+      const result = await coordinator.coordinateReplay(connection, {
+        runId: "run-coord-1",
+      });
+
+      expect(result.success).toBe(true);
+      expect(result.replayedCount).toBe(1); // e1 from DB
+      expect(result.drainedCount).toBe(2); // e2 + e3 both drained!
+      expect(connection.bufferSize).toBe(0);
+      expect(connection.isBuffering).toBe(false);
+
+      expect(stream.writtenChunks).toHaveLength(3);
+      expect(stream.writtenChunks[0]).toContain('"id":"evt-001"');
+      expect(stream.writtenChunks[1]).toContain('"id":"evt-002"');
+      expect(stream.writtenChunks[2]).toContain('"id":"evt-003"');
+    });
+
+    it("halts handoff with BUFFER_OVERFLOW if buffer overflows concurrently during drain", async () => {
+      const e1 = makeRunEvent(1, "2026-10-15T10:00:01.000Z");
+      repository.setEvents(runId("run-coord-1"), [e1]);
+
+      connection.enableBuffering(3);
+
+      const e2 = makeRunEvent(2, "2026-10-15T10:00:02.000Z");
+      await connection.sendEnvelope(createSseExecutionEnvelope(e2));
+
+      // When e2 is being drained, burst 5 events to overflow capacity 3
+      let injected = false;
+      const originalWrite = stream._write.bind(stream);
+      stream._write = (chunk, encoding, callback) => {
+        const text = typeof chunk === "string" ? chunk : chunk.toString("utf8");
+        if (!injected && text.includes('"id":"evt-002"')) {
+          injected = true;
+          for (let i = 3; i <= 8; i++) {
+            void connection.sendEnvelope(
+              createSseExecutionEnvelope(makeRunEvent(i, `2026-10-15T10:00:0${String(i)}.000Z`)),
+            );
+          }
+        }
+        originalWrite(chunk, encoding, callback);
+      };
+
+      const result = await coordinator.coordinateReplay(connection, {
+        runId: "run-coord-1",
+      });
+
+      // Must never silently report success when overflow occurs
+      expect(result.success).toBe(false);
+      expect(result.status).toBe("buffer_overflow");
+      expect(result.reconcileRequired).toBe(true);
+
+      const errorChunk = stream.writtenChunks.find((c) => c.includes('"code":"BUFFER_OVERFLOW"'));
+      expect(errorChunk).toBeDefined();
+    });
+
+    it("deduplicates events across overlapping page boundaries in durable replay", async () => {
+      // Custom repository that simulates overlapping page boundary (evt-002 appears in both pages)
+      const e1 = makeRunEvent(1, "2026-10-15T10:00:01.000Z");
+      const e2 = makeRunEvent(2, "2026-10-15T10:00:02.000Z");
+      const e3 = makeRunEvent(3, "2026-10-15T10:00:03.000Z");
+
+      let callCount = 0;
+      const overlappingRepo = {
+        replayEvents: () => {
+          callCount += 1;
+          if (callCount === 1) {
+            return Promise.resolve({
+              ok: true as const,
+              value: {
+                runId: runId("run-coord-1"),
+                events: [e1, e2],
+                nextCursor: "evt-002",
+                hasMore: true,
+                replayedCount: 2,
+                status: "has_more" as const,
+                reconcileRequired: false,
+                isCatchUpComplete: false,
+              },
+            });
+          }
+          // Page 2 repeats e2 and introduces e3
+          return Promise.resolve({
+            ok: true as const,
+            value: {
+              runId: runId("run-coord-1"),
+              events: [e2, e3],
+              nextCursor: null,
+              hasMore: false,
+              replayedCount: 2,
+              status: "complete" as const,
+              reconcileRequired: false,
+              isCatchUpComplete: true,
+            },
+          });
+        },
+        getLatestEvent: () => Promise.resolve({ ok: true as const, value: null }),
+        getEarliestEvent: () => Promise.resolve({ ok: true as const, value: null }),
+      };
+
+      const overlapCoord = new SseReplayCoordinator({
+        replayRepository: overlappingRepo,
+      });
+
+      const result = await overlapCoord.coordinateReplay(connection, {
+        runId: "run-coord-1",
+      });
+
+      expect(result.success).toBe(true);
+      expect(result.replayedCount).toBe(3); // e1, e2, e3 (duplicate e2 skipped!)
+      expect(stream.writtenChunks).toHaveLength(3);
+      expect(stream.writtenChunks[0]).toContain('"id":"evt-001"');
+      expect(stream.writtenChunks[1]).toContain('"id":"evt-002"');
+      expect(stream.writtenChunks[2]).toContain('"id":"evt-003"');
+    });
+  });
 });

@@ -25,7 +25,7 @@ import {
 import type { Logger } from "@aegis/logger";
 import { runId as toRunId } from "@aegis/types";
 
-import type { ISseConnection } from "./types.js";
+import type { ISseConnection, SseConnectionError } from "./types.js";
 
 export interface SseReplayCoordinatorOptions {
   readonly replayRepository: IRunEventReplayRepository;
@@ -49,7 +49,7 @@ export interface ReplayCoordinationResult {
   readonly status: RunEventReplayStatus;
   readonly reconcileRequired: boolean;
   readonly cursorUsed?: string | undefined;
-  readonly error?: RunEventReplayErrorContract | Error | undefined;
+  readonly error?: RunEventReplayErrorContract | Error | SseConnectionError | undefined;
 }
 
 export class SseReplayCoordinator {
@@ -57,6 +57,7 @@ export class SseReplayCoordinator {
   private readonly defaultPageSize: number;
   private readonly defaultMaxBufferCapacity: number;
   private readonly logger?: Logger | undefined;
+  private readonly inFlightCoordinations = new Map<string, Promise<ReplayCoordinationResult>>();
 
   constructor(options: SseReplayCoordinatorOptions) {
     this.replayRepository = options.replayRepository;
@@ -76,6 +77,29 @@ export class SseReplayCoordinator {
    * Step 5: Disables buffering, completing the transition to live streaming.
    */
   async coordinateReplay(
+    connection: ISseConnection,
+    options: CoordinateReplayOptions,
+  ): Promise<ReplayCoordinationResult> {
+    const existing = this.inFlightCoordinations.get(connection.connectionId);
+    if (existing) {
+      this.logger?.debug("Reusing active in-flight replay coordination for connection", {
+        connectionId: connection.connectionId,
+        runId: options.runId,
+      });
+      return existing;
+    }
+
+    const executionPromise = this.doCoordinateReplay(connection, options);
+    this.inFlightCoordinations.set(connection.connectionId, executionPromise);
+
+    try {
+      return await executionPromise;
+    } finally {
+      this.inFlightCoordinations.delete(connection.connectionId);
+    }
+  }
+
+  private async doCoordinateReplay(
     connection: ISseConnection,
     options: CoordinateReplayOptions,
   ): Promise<ReplayCoordinationResult> {
@@ -192,6 +216,11 @@ export class SseReplayCoordinator {
 
       // Deliver events from current page directly to stream
       for (const event of page.events) {
+        // Concurrency hardening: prevent duplicate delivery from overlapping page boundaries
+        if (replayedEventIds.has(event.id)) {
+          continue;
+        }
+
         const sendRes = await connection.sendHistoricalEvent(event);
         if (!sendRes.ok) {
           this.logger?.warn("Failed to write historical event to SSE stream", {
@@ -242,14 +271,70 @@ export class SseReplayCoordinator {
       return true;
     });
 
-    if (drainResult.ok) {
-      drainedCount = drainResult.value;
-    } else {
+    if (!drainResult.ok) {
       this.logger?.warn("Error draining live replay buffer", {
         connectionId: connection.connectionId,
         runId,
         error: drainResult.error,
       });
+
+      if (drainResult.error.code === "BUFFER_OVERFLOW" || connection.hasBufferOverflowed()) {
+        return this.handleBufferOverflow(connection, runId, totalReplayed, cursor);
+      }
+
+      if (drainResult.error.code === "CONNECTION_CLOSED" || !connection.isOpen) {
+        connection.clearBuffer();
+        connection.disableBuffering();
+        return {
+          success: false,
+          runId,
+          replayedCount: totalReplayed,
+          drainedCount: 0,
+          status: "complete",
+          reconcileRequired: false,
+          cursorUsed: cursor,
+        };
+      }
+
+      await connection.sendError(
+        "INTERNAL_TRANSPORT_ERROR",
+        drainResult.error.message,
+        true,
+        { reconcileRequired: true, runId },
+      );
+      connection.clearBuffer();
+      connection.disableBuffering();
+      return {
+        success: false,
+        runId,
+        replayedCount: totalReplayed,
+        drainedCount: 0,
+        status: "gap_detected",
+        reconcileRequired: true,
+        cursorUsed: cursor,
+        error: drainResult.error,
+      };
+    }
+
+    drainedCount = drainResult.value;
+
+    // Step 4b: Re-verify buffer overflow and connection state immediately post-drain
+    if (connection.hasBufferOverflowed()) {
+      return this.handleBufferOverflow(connection, runId, totalReplayed, cursor);
+    }
+
+    if (!connection.isOpen) {
+      connection.clearBuffer();
+      connection.disableBuffering();
+      return {
+        success: false,
+        runId,
+        replayedCount: totalReplayed,
+        drainedCount,
+        status: "complete",
+        reconcileRequired: false,
+        cursorUsed: cursor,
+      };
     }
 
     // Step 5: Transition to pure live mode
