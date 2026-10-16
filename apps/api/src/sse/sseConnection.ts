@@ -382,6 +382,10 @@ export class SseConnection implements ISseConnection {
       this.heartbeatTimer = undefined;
     }
 
+    // Immediately clear live buffer and disable buffering to reclaim memory
+    this.clearBuffer();
+    this.disableBuffering();
+
     // Attempt to write a clean closed envelope if stream is still writable
     if (!this.targetStream.destroyed && !this.targetStream.writableEnded) {
       try {
@@ -492,15 +496,34 @@ export class SseConnection implements ISseConnection {
 
       let drainTimeout: NodeJS.Timeout | undefined;
 
+      const cleanupListeners = (): void => {
+        if (drainTimeout) {
+          clearTimeout(drainTimeout);
+          drainTimeout = undefined;
+        }
+        this.targetStream.off("drain", onDrain);
+        this.targetStream.off("close", onStreamClose);
+        this.targetStream.off("error", onStreamError);
+      };
+
       const onDrain = (): void => {
-        if (drainTimeout) clearTimeout(drainTimeout);
+        cleanupListeners();
         this.bytesCount += Buffer.byteLength(chunk, "utf8");
         resolve(ok(undefined));
       };
 
-      const onError = (writeError: Error): void => {
-        if (drainTimeout) clearTimeout(drainTimeout);
-        this.targetStream.off("drain", onDrain);
+      const onStreamClose = (): void => {
+        cleanupListeners();
+        resolve(
+          err({
+            code: "CONNECTION_CLOSED",
+            message: `Stream closed while waiting for backpressure drain on connection '${this.connectionId}'.`,
+          }),
+        );
+      };
+
+      const onStreamError = (writeError: Error): void => {
+        cleanupListeners();
         this.errorsCount += 1;
         resolve(
           err({
@@ -513,7 +536,7 @@ export class SseConnection implements ISseConnection {
 
       const canAcceptMore = this.targetStream.write(chunk, "utf8", (cbErr) => {
         if (cbErr) {
-          onError(cbErr);
+          onStreamError(cbErr);
         }
       });
 
@@ -523,10 +546,24 @@ export class SseConnection implements ISseConnection {
         return;
       }
 
-      // Stream applied backpressure; wait for 'drain' event with timeout
+      // Stream applied backpressure; wait for 'drain', 'close', 'error', or timeout
       drainTimeout = setTimeout(() => {
-        this.targetStream.off("drain", onDrain);
+        cleanupListeners();
         this.errorsCount += 1;
+        this.logger?.warn("SSE stream backpressure drain timed out; closing unresponsive connection", {
+          connectionId: this.connectionId,
+          runId: this.runId,
+          drainTimeoutMs: this.drainTimeoutMs,
+        });
+
+        // Evict slow consumer to protect server resources
+        this.handleStreamTermination("backpressure_timeout");
+        try {
+          this.targetStream.destroy();
+        } catch {
+          // Stream may already be destroyed
+        }
+
         resolve(
           err({
             code: "BACKPRESSURE_TIMEOUT",
@@ -535,7 +572,14 @@ export class SseConnection implements ISseConnection {
         );
       }, this.drainTimeoutMs);
 
+      // Prevent timer from keeping Node process alive if configured
+      if (typeof drainTimeout.unref === "function") {
+        drainTimeout.unref();
+      }
+
       this.targetStream.once("drain", onDrain);
+      this.targetStream.once("close", onStreamClose);
+      this.targetStream.once("error", onStreamError);
     });
   }
 
@@ -549,6 +593,10 @@ export class SseConnection implements ISseConnection {
       clearInterval(this.heartbeatTimer);
       this.heartbeatTimer = undefined;
     }
+
+    // Immediately clear live buffer and disable buffering to reclaim memory
+    this.clearBuffer();
+    this.disableBuffering();
 
     for (const listener of this.closeListeners) {
       try {

@@ -176,7 +176,7 @@ export class SseTransportManager {
       closePromises.push(conn.close(reason));
     }
 
-    await Promise.all(closePromises);
+    await Promise.allSettled(closePromises);
     this.connections.clear();
     this.runConnections.clear();
   }

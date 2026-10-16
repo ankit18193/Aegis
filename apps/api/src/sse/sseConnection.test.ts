@@ -1,6 +1,6 @@
 import { Writable } from "node:stream";
 
-import type { RunEvent } from "@aegis/contracts";
+import { createSseExecutionEnvelope, type RunEvent } from "@aegis/contracts";
 import { eventId, runId, taskId, workerId } from "@aegis/types";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -319,6 +319,64 @@ describe("SseConnection Lifecycle Management (Phase 13B — Commit 3)", () => {
       if (!sendRes.ok) {
         expect(sendRes.error.code).toBe("BACKPRESSURE_TIMEOUT");
       }
+    });
+
+    it("cancels drain timeout immediately and returns CONNECTION_CLOSED if client disconnects while waiting for drain", async () => {
+      const conn = new SseConnection(stream, { drainTimeoutMs: 5000 });
+      conn.open();
+
+      vi.spyOn(stream, "write").mockReturnValue(false);
+
+      const sendPromise = conn.sendComment("blocked-data");
+
+      // Client abruptly closes socket before drain or timeout
+      stream.simulateClientDisconnect();
+
+      const sendRes = await sendPromise;
+      expect(sendRes.ok).toBe(false);
+      if (!sendRes.ok) {
+        expect(sendRes.error.code).toBe("CONNECTION_CLOSED");
+      }
+      expect(conn.isClosed).toBe(true);
+    });
+
+    it("evicts slow consumer, triggers backpressure_timeout, and destroys stream upon timeout", async () => {
+      const conn = new SseConnection(stream, { drainTimeoutMs: 1000 });
+      conn.open();
+
+      let terminationReason = "";
+      conn.onClose((reason) => {
+        terminationReason = reason;
+      });
+
+      vi.spyOn(stream, "write").mockReturnValue(false);
+
+      const sendPromise = conn.sendComment("slow-consumer-data");
+
+      // Advance past timeout
+      await vi.advanceTimersByTimeAsync(1100);
+
+      const sendRes = await sendPromise;
+      expect(sendRes.ok).toBe(false);
+      expect(conn.isClosed).toBe(true);
+      expect(terminationReason).toBe("backpressure_timeout");
+    });
+
+    it("clears live replay buffer and disables buffering immediately upon stream termination", async () => {
+      const conn = new SseConnection(stream);
+      conn.open();
+      conn.enableBuffering(100);
+
+      await conn.sendEnvelope(createSseExecutionEnvelope(createSampleRunEvent()));
+
+      expect(conn.bufferSize).toBe(1);
+      expect(conn.isBuffering).toBe(true);
+
+      // Stream terminates
+      stream.simulateClientDisconnect();
+
+      expect(conn.bufferSize).toBe(0);
+      expect(conn.isBuffering).toBe(false);
     });
   });
 
