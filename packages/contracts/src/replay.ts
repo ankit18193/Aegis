@@ -37,7 +37,7 @@
  *   - Pure domain contracts with zero dependencies on Fastify, Kafka consumer internals, or React.
  */
 
-import type { Result, RunId } from "@aegis/types";
+import type { EventId, Result, RunId } from "@aegis/types";
 import { err, eventId, ok } from "@aegis/types";
 import { z } from "zod";
 
@@ -109,7 +109,13 @@ export const runEventReplayRequestSchema = z.object({
    */
   boundaryEventId: eventIdSchema.optional(),
 });
-export type RunEventReplayRequest = z.infer<typeof runEventReplayRequestSchema>;
+
+export interface RunEventReplayRequest {
+  readonly runId: RunId;
+  readonly cursor?: string | undefined;
+  readonly limit?: number | undefined;
+  readonly boundaryEventId?: EventId | undefined;
+}
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Replay Status & Error Codes
