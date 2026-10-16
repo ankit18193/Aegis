@@ -20,7 +20,8 @@ export type SseConnectionErrorCode =
   | "WRITE_FAILED"
   | "BACKPRESSURE_TIMEOUT"
   | "SERIALIZATION_ERROR"
-  | "ALREADY_INITIALIZED";
+  | "ALREADY_INITIALIZED"
+  | "BUFFER_OVERFLOW";
 
 export interface SseConnectionError {
   readonly code: SseConnectionErrorCode;
@@ -79,10 +80,52 @@ export interface SseConnectionOptions {
 export interface ISseConnection {
   readonly connectionId: string;
   readonly runId?: string | undefined;
-  readonly status: SseConnectionStatus;
-  readonly isOpen: boolean;
-  readonly isClosed: boolean;
+  status: SseConnectionStatus;
+  isOpen: boolean;
+  isClosed: boolean;
   readonly stats: SseConnectionStats;
+
+  /**
+   * Whether the connection is actively buffering live broadcast events during replay.
+   */
+  isBuffering: boolean;
+
+  /**
+   * Whether the live event replay buffer has exceeded capacity.
+   */
+  isBufferOverflowed: boolean;
+
+  /**
+   * Current number of buffered live envelopes.
+   */
+  bufferSize: number;
+
+  /**
+   * Dynamically checks whether the live replay buffer has exceeded capacity.
+   */
+  hasBufferOverflowed(): boolean;
+
+  /**
+   * Enables live event buffering for seamless historical replay handoff.
+   */
+  enableBuffering(maxCapacity?: number): void;
+
+  /**
+   * Disables live event buffering, returning to immediate live dispatch.
+   */
+  disableBuffering(): void;
+
+  /**
+   * Empties the internal live replay buffer without writing to the stream.
+   */
+  clearBuffer(): void;
+
+  /**
+   * Drains buffered live events to the underlying stream with optional deduplication.
+   */
+  drainBuffer(
+    filterPredicate?: (envelope: SseTransportEnvelope) => boolean,
+  ): Promise<Result<number, SseConnectionError>>;
 
   /**
    * Initializes the connection and starts the heartbeat timer.
@@ -91,11 +134,27 @@ export interface ISseConnection {
 
   /**
    * Serializes and writes a canonical SseTransportEnvelope to the stream.
+   * If buffering is enabled and the envelope is an execution event, it is placed in the buffer.
    */
   sendEnvelope(
     envelope: SseTransportEnvelope,
     options?: SseSerializeOptions,
   ): Promise<Result<void, SseConnectionError>>;
+
+  /**
+   * Writes an envelope directly to the stream, bypassing the replay buffer.
+   * Used by coordinators during historical replay.
+   */
+  sendDirectEnvelope(
+    envelope: SseTransportEnvelope,
+    options?: SseSerializeOptions,
+  ): Promise<Result<void, SseConnectionError>>;
+
+  /**
+   * Wraps a canonical RunEvent into an execution envelope and writes it directly to the stream,
+   * bypassing the replay buffer. Used during historical event replay.
+   */
+  sendHistoricalEvent(runEvent: RunEvent): Promise<Result<void, SseConnectionError>>;
 
   /**
    * Wraps a canonical RunEvent into an execution envelope and writes it.
@@ -114,6 +173,7 @@ export interface ISseConnection {
     code: SseErrorCode,
     message: string,
     retryable?: boolean,
+    details?: Record<string, unknown>,
   ): Promise<Result<void, SseConnectionError>>;
 
   /**

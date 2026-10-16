@@ -18,6 +18,7 @@ import {
   createSseExecutionEnvelope,
   createSseHeartbeatEnvelope,
   formatSseComment,
+  REPLAY_MAX_BUFFER_CAPACITY,
   serializeSseEnvelope,
   type RunEvent,
   type SseErrorCode,
@@ -60,6 +61,13 @@ export class SseConnection implements ISseConnection {
   private readonly connectedTimestamp: string;
   private closedTimestamp?: string | undefined;
 
+  // ── Replay Buffering State ────────────────────────────────────────────────
+  private _isBuffering = false;
+  private _bufferOverflowed = false;
+  private maxBufferCapacity = REPLAY_MAX_BUFFER_CAPACITY;
+  private readonly replayBuffer: SseTransportEnvelope[] = [];
+  public replayPromise?: Promise<unknown> | undefined;
+
   constructor(targetStream: Writable, options: SseConnectionOptions = {}) {
     this.targetStream = targetStream;
     this.connectionId = options.connectionId ?? randomUUID();
@@ -101,6 +109,66 @@ export class SseConnection implements ISseConnection {
       connectedAt: this.connectedTimestamp,
       closedAt: this.closedTimestamp,
     };
+  }
+
+  get isBuffering(): boolean {
+    return this._isBuffering;
+  }
+
+  get isBufferOverflowed(): boolean {
+    return this._bufferOverflowed;
+  }
+
+  get bufferSize(): number {
+    return this.replayBuffer.length;
+  }
+
+  hasBufferOverflowed(): boolean {
+    return this._bufferOverflowed;
+  }
+
+  enableBuffering(maxCapacity?: number): void {
+    this._isBuffering = true;
+    this._bufferOverflowed = false;
+    this.maxBufferCapacity = maxCapacity ?? REPLAY_MAX_BUFFER_CAPACITY;
+    this.replayBuffer.length = 0;
+  }
+
+  disableBuffering(): void {
+    this._isBuffering = false;
+  }
+
+  clearBuffer(): void {
+    this.replayBuffer.length = 0;
+  }
+
+  async drainBuffer(
+    filterPredicate?: (envelope: SseTransportEnvelope) => boolean,
+  ): Promise<Result<number, SseConnectionError>> {
+    if (!this.isOpen) {
+      this.clearBuffer();
+      return err({
+        code: "CONNECTION_CLOSED",
+        message: `Cannot drain buffer: SSE connection '${this.connectionId}' is closed.`,
+      });
+    }
+
+    const itemsToDrain = [...this.replayBuffer];
+    this.replayBuffer.length = 0;
+    let drainedCount = 0;
+
+    for (const envelope of itemsToDrain) {
+      if (filterPredicate && !filterPredicate(envelope)) {
+        continue;
+      }
+      const writeRes = await this.sendDirectEnvelope(envelope);
+      if (!writeRes.ok) {
+        return writeRes;
+      }
+      drainedCount += 1;
+    }
+
+    return ok(drainedCount);
   }
 
   /**
@@ -153,9 +221,10 @@ export class SseConnection implements ISseConnection {
   }
 
   /**
-   * Serializes and writes a canonical SseTransportEnvelope to the stream.
+   * Serializes and writes a canonical SseTransportEnvelope directly to the stream,
+   * bypassing the replay buffer.
    */
-  async sendEnvelope(
+  async sendDirectEnvelope(
     envelope: SseTransportEnvelope,
     options?: SseSerializeOptions,
   ): Promise<Result<void, SseConnectionError>> {
@@ -184,6 +253,60 @@ export class SseConnection implements ISseConnection {
   }
 
   /**
+   * Serializes and writes a canonical SseTransportEnvelope.
+   * If buffering is enabled and envelope is execution type, it is enqueued into replayBuffer.
+   */
+  async sendEnvelope(
+    envelope: SseTransportEnvelope,
+    options?: SseSerializeOptions,
+  ): Promise<Result<void, SseConnectionError>> {
+    if (!this.isOpen) {
+      return err({
+        code: "CONNECTION_CLOSED",
+        message: `Cannot write to SSE connection '${this.connectionId}': connection is not open.`,
+      });
+    }
+
+    if (this._isBuffering && envelope.type === "execution") {
+      if (this._bufferOverflowed) {
+        return err({
+          code: "BUFFER_OVERFLOW",
+          message: `SSE replay buffer overflowed on connection '${this.connectionId}'. Safe handoff halted.`,
+        });
+      }
+
+      if (this.replayBuffer.length >= this.maxBufferCapacity) {
+        this._bufferOverflowed = true;
+        this.errorsCount += 1;
+        this.logger?.warn("SSE connection live buffer capacity exceeded", {
+          connectionId: this.connectionId,
+          runId: this.runId,
+          bufferSize: this.replayBuffer.length,
+          maxCapacity: this.maxBufferCapacity,
+        });
+        return err({
+          code: "BUFFER_OVERFLOW",
+          message: `SSE replay buffer overflowed (capacity: ${String(this.maxBufferCapacity)}).`,
+        });
+      }
+
+      this.replayBuffer.push(envelope);
+      return ok(undefined);
+    }
+
+    return this.sendDirectEnvelope(envelope, options);
+  }
+
+  /**
+   * Wraps a canonical RunEvent into an execution envelope and writes it directly to the stream,
+   * bypassing the live buffer. Used during historical event replay.
+   */
+  async sendHistoricalEvent(runEvent: RunEvent): Promise<Result<void, SseConnectionError>> {
+    const envelope = createSseExecutionEnvelope(runEvent);
+    return this.sendDirectEnvelope(envelope);
+  }
+
+  /**
    * Wraps a canonical RunEvent into an execution envelope and writes it.
    */
   async sendEvent(runEvent: RunEvent): Promise<Result<void, SseConnectionError>> {
@@ -207,12 +330,13 @@ export class SseConnection implements ISseConnection {
   }
 
   /**
-   * Sends a structured transport-level error frame.
+   * Sends a structured transport-level error frame directly to the stream.
    */
   async sendError(
     code: SseErrorCode,
     message: string,
     retryable = false,
+    details?: Record<string, unknown>,
   ): Promise<Result<void, SseConnectionError>> {
     const errorEnvelope = createSseErrorEnvelope({
       id: eventId(`err-${this.connectionId}-${String(Date.now())}`),
@@ -220,8 +344,9 @@ export class SseConnection implements ISseConnection {
       message,
       retryable,
       runId: this.runId ? toRunId(this.runId) : undefined,
+      ...(details !== undefined ? { details } : {}),
     });
-    return this.sendEnvelope(errorEnvelope);
+    return this.sendDirectEnvelope(errorEnvelope);
   }
 
   /**

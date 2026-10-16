@@ -5,6 +5,8 @@ import { eventId, runId, taskId, workerId } from "@aegis/types";
 import fastify, { type FastifyInstance } from "fastify";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
+import { InMemoryRunEventReplayRepository } from "../repositories/inMemoryRunEventReplayRepository.js";
+
 import {
   registerSseTransportRoutes,
   SseTransportManager,
@@ -158,4 +160,109 @@ describe("Fastify SSE Transport Foundation (Phase 13B — Commit 4)", () => {
       expect(dummyStream.isFinalized).toBe(true);
     });
   });
+
+  describe("Durable Replay & Last-Event-ID Coordination (Phase 13D — Commit 3)", () => {
+    it("coordinates replay when Last-Event-ID header is present", async () => {
+      const replayRepo = new InMemoryRunEventReplayRepository();
+      const testApp = fastify({ logger: false });
+      const testManager = new SseTransportManager({ defaultHeartbeatIntervalMs: 5000 });
+      registerSseTransportRoutes(testApp, testManager, replayRepo);
+      await testApp.ready();
+
+      // Seed 3 events for run-replay-10
+      replayRepo.setEvents(runId("run-replay-10"), [
+        {
+          id: eventId("evt-r-1"),
+          runId: runId("run-replay-10"),
+          type: "task_started",
+          severity: "info",
+          timestamp: "2026-10-15T00:00:01.000Z",
+          message: "Task 1",
+          taskId: taskId("task-r-1"),
+          worker: workerId("worker-1"),
+        },
+        {
+          id: eventId("evt-r-2"),
+          runId: runId("run-replay-10"),
+          type: "task_started",
+          severity: "info",
+          timestamp: "2026-10-15T00:00:02.000Z",
+          message: "Task 2",
+          taskId: taskId("task-r-2"),
+          worker: workerId("worker-1"),
+        },
+        {
+          id: eventId("evt-r-3"),
+          runId: runId("run-replay-10"),
+          type: "task_started",
+          severity: "info",
+          timestamp: "2026-10-15T00:00:03.000Z",
+          message: "Task 3",
+          taskId: taskId("task-r-3"),
+          worker: workerId("worker-1"),
+        },
+      ]);
+
+      // Connect with Last-Event-ID: evt-r-1
+      const response = await testApp.inject({
+        method: "GET",
+        url: "/api/v1/stream/transport?runId=run-replay-10&closeImmediately=true",
+        headers: {
+          "Last-Event-ID": "evt-r-1",
+        },
+      });
+
+      expect(response.statusCode).toBe(200);
+      expect(response.body).toContain("event: connected\n");
+      // evt-r-1 was the anchor, so evt-r-2 and evt-r-3 are replayed
+      expect(response.body).not.toContain('"id":"evt-r-1"');
+      expect(response.body).toContain('"id":"evt-r-2"');
+      expect(response.body).toContain('"id":"evt-r-3"');
+
+      await testApp.close();
+    });
+
+    it("coordinates replay when lastEventId query parameter is provided", async () => {
+      const replayRepo = new InMemoryRunEventReplayRepository();
+      const testApp = fastify({ logger: false });
+      const testManager = new SseTransportManager({ defaultHeartbeatIntervalMs: 5000 });
+      registerSseTransportRoutes(testApp, testManager, replayRepo);
+      await testApp.ready();
+
+      replayRepo.setEvents(runId("run-replay-20"), [
+        {
+          id: eventId("evt-q-1"),
+          runId: runId("run-replay-20"),
+          type: "task_started",
+          severity: "info",
+          timestamp: "2026-10-15T00:00:01.000Z",
+          message: "Task 1",
+          taskId: taskId("task-q-1"),
+          worker: workerId("worker-1"),
+        },
+        {
+          id: eventId("evt-q-2"),
+          runId: runId("run-replay-20"),
+          type: "task_started",
+          severity: "info",
+          timestamp: "2026-10-15T00:00:02.000Z",
+          message: "Task 2",
+          taskId: taskId("task-q-2"),
+          worker: workerId("worker-1"),
+        },
+      ]);
+
+      const response = await testApp.inject({
+        method: "GET",
+        url: "/api/v1/stream/transport?runId=run-replay-20&lastEventId=evt-q-1&closeImmediately=true",
+      });
+
+      expect(response.statusCode).toBe(200);
+      expect(response.body).toContain('"id":"evt-q-2"');
+      expect(response.body).not.toContain('"id":"evt-q-1"');
+
+      await testApp.close();
+    });
+  });
 });
+

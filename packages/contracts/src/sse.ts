@@ -76,6 +76,8 @@ export const sseErrorCodeSchema = z.enum([
   "INVALID_PROTOCOL_VERSION",
   "MALFORMED_PAYLOAD",
   "CONNECTION_ABORTED",
+  "BUFFER_OVERFLOW",
+  "REPLAY_GAP_DETECTED",
 ]);
 export type SseErrorCode = z.infer<typeof sseErrorCodeSchema>;
 
@@ -288,8 +290,8 @@ export function createSseErrorEnvelope(params: {
   message: string;
   retryable: boolean;
   runId?: SseErrorEnvelope["runId"];
-  details?: Record<string, unknown>;
-  timestamp?: string;
+  details?: Record<string, unknown> | undefined;
+  timestamp?: string | undefined;
 }): SseErrorEnvelope {
   const timestamp = params.timestamp ?? new Date().toISOString();
   return {

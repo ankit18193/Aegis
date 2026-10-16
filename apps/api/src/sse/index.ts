@@ -7,3 +7,4 @@ export * from "./sseConnection.js";
 export * from "./sseTransportManager.js";
 export * from "./fastifySseTransport.js";
 export * from "./sseEventGateway.js";
+export * from "./sseReplayCoordinator.js";

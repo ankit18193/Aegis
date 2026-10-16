@@ -1,4 +1,4 @@
-import type { IRecoveryCoordinator } from "@aegis/contracts";
+import type { IRecoveryCoordinator, IRunEventReplayRepository } from "@aegis/contracts";
 import { createLogger, type Logger } from "@aegis/logger";
 import cors from "@fastify/cors";
 import fastify, { type FastifyInstance } from "fastify";
@@ -10,14 +10,20 @@ import { McpClientManager } from "./mcp/manager.js";
 import type { McpServerConfig } from "./mcp/types.js";
 import { registerCorrelationHooks } from "./middleware/correlation.js";
 import { registerErrorHandlers } from "./middleware/errorHandler.js";
+import { InMemoryRunEventReplayRepository } from "./repositories/inMemoryRunEventReplayRepository.js";
 import { InMemoryRunRepository } from "./repositories/inMemoryRunRepository.js";
+import { PostgresRunEventReplayRepository } from "./repositories/postgresRunEventReplayRepository.js";
 import { PostgresRunRepository } from "./repositories/postgresRunRepository.js";
 import type { IRunRepository } from "./repositories/runRepository.js";
 import { registerHealthRoutes } from "./routes/health.js";
 import { registerRunRoutes } from "./routes/runs.js";
 import { AgentRunService } from "./services/agentRunService.js";
 import type { RunApplicationService } from "./services/runService.js";
-import { registerSseTransportRoutes, SseTransportManager } from "./sse/index.js";
+import {
+  registerSseTransportRoutes,
+  SseReplayCoordinator,
+  SseTransportManager,
+} from "./sse/index.js";
 import { ToolActionExecutor } from "./tools/adapter.js";
 import { registerBuiltinTools } from "./tools/builtins/index.js";
 import { ToolExecutor } from "./tools/executor.js";
@@ -35,6 +41,8 @@ export interface BuildAppOptions {
   outboxPublisher?: OutboxPublisher | undefined;
   recoveryCoordinator?: IRecoveryCoordinator | undefined;
   sseTransportManager?: SseTransportManager | undefined;
+  replayRepository?: IRunEventReplayRepository | undefined;
+  replayCoordinator?: SseReplayCoordinator | undefined;
 }
 
 /**
@@ -133,9 +141,32 @@ export async function buildApp(options: BuildAppOptions = {}): Promise<FastifyIn
   // Register run operations & event routes
   registerRunRoutes(app, runService);
 
-  // Register SSE transport routes
+  // Register SSE transport routes with durable replay coordinator
   const sseManager = options.sseTransportManager ?? new SseTransportManager({ logger });
-  registerSseTransportRoutes(app, sseManager);
+  let replayRepo = options.replayRepository;
+  if (!replayRepo) {
+    if (options.databaseContext) {
+      replayRepo = new PostgresRunEventReplayRepository(options.databaseContext);
+    } else if (config.nodeEnv !== "test" && config.database.url) {
+      const dbContext = createDatabaseContext(config.database);
+      replayRepo = new PostgresRunEventReplayRepository(dbContext);
+    } else {
+      replayRepo = new InMemoryRunEventReplayRepository();
+    }
+  }
+
+  const replayCoordinator =
+    options.replayCoordinator ??
+    new SseReplayCoordinator({
+      replayRepository: replayRepo,
+      logger,
+    });
+
+  registerSseTransportRoutes(app, sseManager, {
+    replayRepository: replayRepo,
+    replayCoordinator,
+    logger,
+  });
 
   return app;
 }
