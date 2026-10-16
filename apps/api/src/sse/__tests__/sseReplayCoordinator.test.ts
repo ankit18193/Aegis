@@ -2,6 +2,7 @@ import { Writable } from "node:stream";
 
 import {
   createSseExecutionEnvelope,
+  type IRunEventReplayRepository,
   type RunEvent,
 } from "@aegis/contracts";
 import { eventId, runId, taskId, workerId } from "@aegis/types";
@@ -461,5 +462,66 @@ describe("SseReplayCoordinator (Phase 13D — Commit 3)", () => {
       expect(stream.writtenChunks[1]).toContain('"id":"evt-002"');
       expect(stream.writtenChunks[2]).toContain('"id":"evt-003"');
     });
+
+    it("rejects cross-run replay coordination when connection is bound to a different runId", async () => {
+      const conn = new SseConnection(stream, { runId: "run-target" });
+      conn.open();
+
+      const result = await coordinator.coordinateReplay(conn, {
+        runId: "run-other",
+      });
+
+      expect(result.success).toBe(false);
+      expect(result.reconcileRequired).toBe(true);
+      expect(result.error?.message).toContain("Cannot coordinate replay for run 'run-other' on connection bound to run 'run-target'");
+      expect(stream.writtenChunks).toHaveLength(0);
+    });
+
+    it("filters out any historical events belonging to a different run during replay", async () => {
+      const conn = new SseConnection(stream, { runId: "run-target" });
+      conn.open();
+
+      const e1 = makeRunEvent(1, "2026-10-15T10:00:01.000Z", "run-target");
+      const eAlien: RunEvent = {
+        ...makeRunEvent(2, "2026-10-15T10:00:02.000Z", "run-alien"),
+        runId: runId("run-alien"),
+      };
+      const e3 = makeRunEvent(3, "2026-10-15T10:00:03.000Z", "run-target");
+
+      const contaminatedRepo: IRunEventReplayRepository = {
+        replayEvents: () => {
+          return Promise.resolve({
+            ok: true as const,
+            value: {
+              runId: runId("run-target"),
+              events: [e1, eAlien, e3],
+              nextCursor: null,
+              hasMore: false,
+              replayedCount: 3,
+              status: "complete" as const,
+              reconcileRequired: false,
+              isCatchUpComplete: true,
+            },
+          });
+        },
+        getLatestEvent: () => Promise.resolve({ ok: true as const, value: null }),
+        getEarliestEvent: () => Promise.resolve({ ok: true as const, value: null }),
+      };
+
+      const isolatedCoord = new SseReplayCoordinator({
+        replayRepository: contaminatedRepo,
+      });
+
+      const result = await isolatedCoord.coordinateReplay(conn, {
+        runId: "run-target",
+      });
+
+      expect(result.success).toBe(true);
+      expect(result.replayedCount).toBe(2); // e1 and e3 only! eAlien is filtered out
+      expect(stream.writtenChunks).toHaveLength(2);
+      expect(stream.writtenChunks[0]).toContain('"id":"evt-001"');
+      expect(stream.writtenChunks[1]).toContain('"id":"evt-003"');
+    });
   });
 });
+

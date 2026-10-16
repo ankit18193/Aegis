@@ -21,7 +21,8 @@ export type SseConnectionErrorCode =
   | "BACKPRESSURE_TIMEOUT"
   | "SERIALIZATION_ERROR"
   | "ALREADY_INITIALIZED"
-  | "BUFFER_OVERFLOW";
+  | "BUFFER_OVERFLOW"
+  | "CROSS_RUN_ISOLATION_VIOLATION";
 
 export interface SseConnectionError {
   readonly code: SseConnectionErrorCode;

@@ -189,6 +189,20 @@ describe("SseConnection Lifecycle Management (Phase 13B — Commit 3)", () => {
         expect(sendRes.error.code).toBe("CONNECTION_CLOSED");
       }
     });
+
+    it("rejects execution events for a different runId with CROSS_RUN_ISOLATION_VIOLATION", async () => {
+      const conn = new SseConnection(stream, { runId: "run-alpha" });
+      conn.open();
+
+      const foreignEvent = createSampleRunEvent(); // default run-test-1
+      const sendRes = await conn.sendEvent(foreignEvent);
+
+      expect(sendRes.ok).toBe(false);
+      if (!sendRes.ok) {
+        expect(sendRes.error.code).toBe("CROSS_RUN_ISOLATION_VIOLATION");
+      }
+      expect(stream.writtenChunks).toHaveLength(0);
+    });
   });
 
   describe("Heartbeat Management", () => {

@@ -248,6 +248,23 @@ export class SseConnection implements ISseConnection {
       });
     }
 
+    // Strict stream isolation: prevent cross-run event leakage
+    if (this.runId && envelope.type === "execution") {
+      const eventRunId = envelope.payload.runId;
+      if (eventRunId && eventRunId !== this.runId) {
+        this.errorsCount += 1;
+        this.logger?.warn("Rejected cross-run execution envelope on direct write", {
+          connectionId: this.connectionId,
+          connectionRunId: this.runId,
+          eventRunId,
+        });
+        return err({
+          code: "CROSS_RUN_ISOLATION_VIOLATION",
+          message: `Cannot send event for run '${eventRunId}' to SSE connection bound to run '${this.runId}'.`,
+        });
+      }
+    }
+
     const serializeRes = serializeSseEnvelope(envelope, options);
     if (!serializeRes.ok) {
       this.errorsCount += 1;
@@ -278,6 +295,23 @@ export class SseConnection implements ISseConnection {
         code: "CONNECTION_CLOSED",
         message: `Cannot write to SSE connection '${this.connectionId}': connection is not open.`,
       });
+    }
+
+    // Strict stream isolation: prevent cross-run event leakage
+    if (this.runId && envelope.type === "execution") {
+      const eventRunId = envelope.payload.runId;
+      if (eventRunId && eventRunId !== this.runId) {
+        this.errorsCount += 1;
+        this.logger?.warn("Rejected cross-run execution envelope on sendEnvelope", {
+          connectionId: this.connectionId,
+          connectionRunId: this.runId,
+          eventRunId,
+        });
+        return err({
+          code: "CROSS_RUN_ISOLATION_VIOLATION",
+          message: `Cannot send event for run '${eventRunId}' to SSE connection bound to run '${this.runId}'.`,
+        });
+      }
     }
 
     if (this._isBuffering && envelope.type === "execution") {

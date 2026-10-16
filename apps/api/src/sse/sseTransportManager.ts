@@ -144,6 +144,14 @@ export class SseTransportManager {
     runId: string,
     envelope: SseTransportEnvelope,
   ): Promise<number> {
+    if (envelope.type === "execution" && envelope.payload.runId && envelope.payload.runId !== runId) {
+      this.logger?.warn("Prevented cross-run broadcast leakage in transport manager", {
+        targetRunId: runId,
+        envelopeRunId: envelope.payload.runId,
+      });
+      return 0;
+    }
+
     const targets = this.getConnectionsByRunId(runId);
     if (targets.length === 0) return 0;
 

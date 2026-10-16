@@ -107,6 +107,27 @@ export class SseReplayCoordinator {
     const pageSize = options.pageSize ?? this.defaultPageSize;
     const maxCapacity = options.maxBufferCapacity ?? this.defaultMaxBufferCapacity;
 
+    // Step 0: Enforce connection run isolation
+    if (connection.runId && runId !== connection.runId) {
+      this.logger?.warn("Cross-run replay coordination rejected", {
+        connectionId: connection.connectionId,
+        connectionRunId: connection.runId,
+        requestedRunId: runId,
+      });
+      return {
+        success: false,
+        runId,
+        replayedCount: 0,
+        drainedCount: 0,
+        status: "complete",
+        reconcileRequired: true,
+        cursorUsed: cursor,
+        error: new Error(
+          `Cannot coordinate replay for run '${runId}' on connection bound to run '${connection.runId}'.`,
+        ),
+      };
+    }
+
     this.logger?.debug("Starting SSE replay coordination", {
       connectionId: connection.connectionId,
       runId,
@@ -216,6 +237,11 @@ export class SseReplayCoordinator {
 
       // Deliver events from current page directly to stream
       for (const event of page.events) {
+        // Enforce stream isolation on durable events
+        if (event.runId && event.runId !== runId) {
+          continue;
+        }
+
         // Concurrency hardening: prevent duplicate delivery from overlapping page boundaries
         if (replayedEventIds.has(event.id)) {
           continue;
