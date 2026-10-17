@@ -37,6 +37,21 @@ export type LeaseId = Brand<string, "LeaseId">;
 /** A unique identifier for a Transactional Outbox Event. */
 export type OutboxEventId = Brand<string, "OutboxEventId">;
 
+/** A unique identifier for an Evaluation Suite. */
+export type EvaluationSuiteId = Brand<string, "EvaluationSuiteId">;
+
+/** A unique identifier for an Evaluation Case. */
+export type EvaluationCaseId = Brand<string, "EvaluationCaseId">;
+
+/** A unique identifier for an Evaluation Run. */
+export type EvaluationRunId = Brand<string, "EvaluationRunId">;
+
+/** A unique identifier for an Evaluation Result. */
+export type EvaluationResultId = Brand<string, "EvaluationResultId">;
+
+/** A unique identifier for an Evaluator component. */
+export type EvaluatorId = Brand<string, "EvaluatorId">;
+
 /**
  * Creates a branded RunId from a raw string.
  * Use this at trust boundaries (e.g., when reading from an API or database).
@@ -107,6 +122,41 @@ export function leaseId(raw: string): LeaseId {
  */
 export function outboxEventId(raw: string): OutboxEventId {
   return raw as OutboxEventId;
+}
+
+/**
+ * Creates a branded EvaluationSuiteId from a raw string.
+ */
+export function evaluationSuiteId(raw: string): EvaluationSuiteId {
+  return raw as EvaluationSuiteId;
+}
+
+/**
+ * Creates a branded EvaluationCaseId from a raw string.
+ */
+export function evaluationCaseId(raw: string): EvaluationCaseId {
+  return raw as EvaluationCaseId;
+}
+
+/**
+ * Creates a branded EvaluationRunId from a raw string.
+ */
+export function evaluationRunId(raw: string): EvaluationRunId {
+  return raw as EvaluationRunId;
+}
+
+/**
+ * Creates a branded EvaluationResultId from a raw string.
+ */
+export function evaluationResultId(raw: string): EvaluationResultId {
+  return raw as EvaluationResultId;
+}
+
+/**
+ * Creates a branded EvaluatorId from a raw string.
+ */
+export function evaluatorId(raw: string): EvaluatorId {
+  return raw as EvaluatorId;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

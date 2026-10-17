@@ -4,6 +4,11 @@ import {
   agentId,
   AgentStatus,
   err,
+  evaluationCaseId,
+  evaluationResultId,
+  evaluationRunId,
+  evaluationSuiteId,
+  evaluatorId,
   eventId,
   ok,
   runId,
@@ -35,6 +40,25 @@ describe("@aegis/types Domain Primitives", () => {
       expect(wfId).toBe("wf-001");
       expect(tId).toBe("task-001");
       expect(wId).toBe("worker-alpha");
+    });
+
+    it("creates branded Evaluation domain identifiers", () => {
+      const sId = evaluationSuiteId("suite-100");
+      const cId = evaluationCaseId("case-200");
+      const erId = evaluationRunId("evalrun-300");
+      const resId = evaluationResultId("evalres-400");
+      const evId = evaluatorId("evaluator-exact-match");
+
+      expect(sId).toBe("suite-100");
+      expect(cId).toBe("case-200");
+      expect(erId).toBe("evalrun-300");
+      expect(resId).toBe("evalres-400");
+      expect(evId).toBe("evaluator-exact-match");
+      expect(typeof sId).toBe("string");
+      expect(typeof cId).toBe("string");
+      expect(typeof erId).toBe("string");
+      expect(typeof resId).toBe("string");
+      expect(typeof evId).toBe("string");
     });
   });
 
