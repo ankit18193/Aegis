@@ -12,6 +12,16 @@ import {
 } from "./evaluationRun.js";
 
 describe("Evaluation Run Contract & State Machine", () => {
+  describe("evaluationRunIdSchema", () => {
+    it("parses valid evaluation run identifier", () => {
+      expect(evaluationRunIdSchema.parse("evalrun-001")).toBe("evalrun-001");
+    });
+
+    it("rejects empty evaluation run identifier", () => {
+      expect(() => evaluationRunIdSchema.parse("")).toThrow();
+    });
+  });
+
   describe("evaluationRunStatusSchema", () => {
     it("validates all canonical evaluation run statuses", () => {
       const statuses = ["pending", "running", "completed", "failed", "cancelled"];

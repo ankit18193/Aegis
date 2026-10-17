@@ -1,9 +1,14 @@
-import type { EvaluationCaseId, EvaluationResultId, EvaluationRunId, EvaluatorId } from "@aegis/types";
+import type { EvaluationResultId } from "@aegis/types";
 import { z } from "zod";
 
 import { eventIdSchema, runIdSchema } from "../runs.js";
-import { evaluationCaseIdSchema, evaluationSuiteIdSchema, evaluatorIdSchema } from "./evaluationSuite.js";
+
 import { evaluationRunIdSchema } from "./evaluationRun.js";
+import {
+  evaluationCaseIdSchema,
+  evaluationSuiteIdSchema,
+  evaluatorIdSchema,
+} from "./evaluationSuite.js";
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Branded Identifier Schema

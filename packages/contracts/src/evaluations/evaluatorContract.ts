@@ -3,12 +3,13 @@ import { z } from "zod";
 
 import { runEventSchema } from "../events.js";
 import { runSchema } from "../runs.js";
-import { evaluationCaseIdSchema, evaluatorIdSchema, existingRunTargetSchema } from "./evaluationSuite.js";
+
 import {
   assertionResultSchema,
   evaluationVerdictSchema,
   failureClassificationSchema,
 } from "./evaluationResult.js";
+import { evaluationCaseIdSchema, existingRunTargetSchema } from "./evaluationSuite.js";
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Evaluator Metadata & Classification Schemas

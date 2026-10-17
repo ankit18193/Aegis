@@ -94,3 +94,4 @@ export * from "./sse.js";
 export * from "./sseSerializer.js";
 export * from "./sseAdapter.js";
 export * from "./replay.js";
+export * from "./evaluations/index.js";
