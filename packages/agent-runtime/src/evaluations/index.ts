@@ -4,4 +4,7 @@
  */
 
 export * from "./registry.js";
+export * from "./evidence.js";
+export * from "./engine.js";
 export * from "./evaluators/index.js";
+
