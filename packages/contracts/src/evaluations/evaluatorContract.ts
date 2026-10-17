@@ -4,12 +4,12 @@ import { z } from "zod";
 import { runEventSchema } from "../events.js";
 import { runSchema } from "../runs.js";
 
+import { MAX_RAW_OUTPUT_BYTES } from "./evaluationConstants.js";
 import {
   assertionResultSchema,
   evaluationVerdictSchema,
   failureClassificationSchema,
 } from "./evaluationResult.js";
-import { MAX_RAW_OUTPUT_BYTES } from "./evaluationConstants.js";
 import { evaluationCaseIdSchema, existingRunTargetSchema } from "./evaluationSuite.js";
 
 // ─────────────────────────────────────────────────────────────────────────────

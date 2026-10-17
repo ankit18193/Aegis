@@ -1,10 +1,8 @@
 import type { EvaluationRunId, EvaluationSuiteId, Result } from "@aegis/types";
 
-import type { EvaluationRunStatus } from "./evaluationRun.js";
-
 import type { EvaluationErrorResponse } from "./evaluationErrors.js";
 import type { EvaluationResult } from "./evaluationResult.js";
-import type { EvaluationRun, EvaluationRunSummary } from "./evaluationRun.js";
+import type { EvaluationRun, EvaluationRunStatus, EvaluationRunSummary } from "./evaluationRun.js";
 import type { EvaluationSuite } from "./evaluationSuite.js";
 
 // ─────────────────────────────────────────────────────────────────────────────

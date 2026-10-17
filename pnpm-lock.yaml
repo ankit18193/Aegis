@@ -358,6 +358,9 @@ importers:
 
   packages/agent-runtime:
     dependencies:
+      '@aegis/contracts':
+        specifier: workspace:*
+        version: link:../contracts
       '@aegis/foundation':
         specifier: workspace:*
         version: link:../foundation

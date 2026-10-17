@@ -1,3 +1,4 @@
+import { evaluatorId } from "@aegis/types";
 import { describe, expect, it } from "vitest";
 
 import {
@@ -90,26 +91,26 @@ describe("Evaluator Contract Schemas & Comparability", () => {
 
   describe("areEvaluatorMetricsComparable", () => {
     it("returns true when evaluatorId, version, and metricType match exactly", () => {
-      const a = { id: "exact-match", version: "1.0.0", metricType: "binary" as const };
-      const b = { id: "exact-match", version: "1.0.0", metricType: "binary" as const };
+      const a = { id: evaluatorId("exact-match"), version: "1.0.0", metricType: "binary" as const };
+      const b = { id: evaluatorId("exact-match"), version: "1.0.0", metricType: "binary" as const };
       expect(areEvaluatorMetricsComparable(a, b)).toBe(true);
     });
 
     it("returns false when evaluatorId differs", () => {
-      const a = { id: "exact-match", version: "1.0.0", metricType: "binary" as const };
-      const b = { id: "fuzzy-match", version: "1.0.0", metricType: "binary" as const };
+      const a = { id: evaluatorId("exact-match"), version: "1.0.0", metricType: "binary" as const };
+      const b = { id: evaluatorId("fuzzy-match"), version: "1.0.0", metricType: "binary" as const };
       expect(areEvaluatorMetricsComparable(a, b)).toBe(false);
     });
 
     it("returns false when version differs", () => {
-      const a = { id: "exact-match", version: "1.0.0", metricType: "binary" as const };
-      const b = { id: "exact-match", version: "1.1.0", metricType: "binary" as const };
+      const a = { id: evaluatorId("exact-match"), version: "1.0.0", metricType: "binary" as const };
+      const b = { id: evaluatorId("exact-match"), version: "1.1.0", metricType: "binary" as const };
       expect(areEvaluatorMetricsComparable(a, b)).toBe(false);
     });
 
     it("returns false when metricType differs", () => {
-      const a = { id: "evaluator-score", version: "1.0.0", metricType: "binary" as const };
-      const b = { id: "evaluator-score", version: "1.0.0", metricType: "continuous_score" as const };
+      const a = { id: evaluatorId("evaluator-score"), version: "1.0.0", metricType: "binary" as const };
+      const b = { id: evaluatorId("evaluator-score"), version: "1.0.0", metricType: "continuous_score" as const };
       expect(areEvaluatorMetricsComparable(a, b)).toBe(false);
     });
   });

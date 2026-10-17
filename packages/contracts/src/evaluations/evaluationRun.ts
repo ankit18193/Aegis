@@ -87,7 +87,7 @@ export const evaluationMetricsSchema = z
     if (terminalSum > data.totalCases) {
       ctx.addIssue({
         code: z.ZodIssueCode.custom,
-        message: `EvaluationMetrics invariant violated: passedCases + failedCases + errorCases + skippedCases (${terminalSum}) exceeds totalCases (${data.totalCases}).`,
+        message: `EvaluationMetrics invariant violated: passedCases + failedCases + errorCases + skippedCases (${String(terminalSum)}) exceeds totalCases (${String(data.totalCases)}).`,
         path: ["totalCases"],
       });
     }
@@ -126,9 +126,9 @@ export function calculateEvaluationMetrics(params: {
   if (terminalSum > totalCases) {
     throw new Error(
       `calculateEvaluationMetrics: inconsistent inputs — ` +
-        `passedCases(${passedCases}) + failedCases(${failedCases}) + ` +
-        `errorCases(${errorCases}) + skippedCases(${skippedCases}) = ${terminalSum} ` +
-        `exceeds totalCases(${totalCases}).`,
+        `passedCases(${String(passedCases)}) + failedCases(${String(failedCases)}) + ` +
+        `errorCases(${String(errorCases)}) + skippedCases(${String(skippedCases)}) = ${String(terminalSum)} ` +
+        `exceeds totalCases(${String(totalCases)}).`,
     );
   }
 
