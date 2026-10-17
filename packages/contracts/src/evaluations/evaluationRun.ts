@@ -13,6 +13,18 @@ export const evaluationRunIdSchema = z.string().min(1) as unknown as z.ZodType<E
 // Evaluation Run Lifecycle Status & State Machine
 // ─────────────────────────────────────────────────────────────────────────────
 
+/**
+ * Lifecycle status of an EvaluationRun.
+ *
+ * - `pending`   — Run created, not yet started.
+ * - `running`   — Actively executing case evaluations.
+ * - `completed` — All cases reached a terminal verdict (pass/fail/error/skipped).
+ *                 A run is `completed` even if every case verdict is `fail` or `error`.
+ * - `failed`    — The run executor itself crashed or was aborted (infrastructure failure).
+ *                 Distinct from `completed` with all-error verdicts.
+ *                 This status indicates the run did NOT finish executing all cases.
+ * - `cancelled` — Explicitly cancelled by an operator or time-out policy.
+ */
 export const evaluationRunStatusSchema = z.enum([
   "pending",
   "running",
@@ -52,21 +64,34 @@ export function isValidEvaluationRunTransition(
 
 /**
  * Aggregated evaluation run metrics.
+ * Invariant: passedCases + failedCases + errorCases + skippedCases <= totalCases.
  * Note: Uses four mutually exclusive terminal counters (passed, failed, error, skipped).
  * The previous ambiguous completedCases counter is eliminated to prevent overlapping state.
  */
-export const evaluationMetricsSchema = z.object({
-  totalCases: z.number().int().nonnegative(),
-  passedCases: z.number().int().nonnegative(),
-  failedCases: z.number().int().nonnegative(),
-  errorCases: z.number().int().nonnegative(),
-  skippedCases: z.number().int().nonnegative(),
-  passRate: z.number().min(0).max(1).nullable(),
-  errorRate: z.number().min(0).max(1),
-  skippedRate: z.number().min(0).max(1),
-  meanScore: z.number().min(0).max(1).nullable(),
-  durationMs: z.number().nonnegative(),
-});
+export const evaluationMetricsSchema = z
+  .object({
+    totalCases: z.number().int().nonnegative(),
+    passedCases: z.number().int().nonnegative(),
+    failedCases: z.number().int().nonnegative(),
+    errorCases: z.number().int().nonnegative(),
+    skippedCases: z.number().int().nonnegative(),
+    passRate: z.number().min(0).max(1).nullable(),
+    errorRate: z.number().min(0).max(1),
+    skippedRate: z.number().min(0).max(1),
+    meanScore: z.number().min(0).max(1).nullable(),
+    durationMs: z.number().nonnegative(),
+  })
+  .superRefine((data, ctx) => {
+    const terminalSum =
+      data.passedCases + data.failedCases + data.errorCases + data.skippedCases;
+    if (terminalSum > data.totalCases) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: `EvaluationMetrics invariant violated: passedCases + failedCases + errorCases + skippedCases (${terminalSum}) exceeds totalCases (${data.totalCases}).`,
+        path: ["totalCases"],
+      });
+    }
+  });
 export type EvaluationMetrics = z.infer<typeof evaluationMetricsSchema>;
 
 /**
@@ -81,6 +106,8 @@ export function isEvaluationRunComplete(metrics: EvaluationMetrics): boolean {
 
 /**
  * Computes deterministic, null-safe evaluation metrics.
+ * Throws if the input case counts are internally inconsistent
+ * (passedCases + failedCases + errorCases + skippedCases > totalCases).
  * If evaluableCases (passed + failed) === 0, passRate evaluates strictly to null.
  */
 export function calculateEvaluationMetrics(params: {
@@ -94,6 +121,17 @@ export function calculateEvaluationMetrics(params: {
 }): EvaluationMetrics {
   const { totalCases, passedCases, failedCases, errorCases, skippedCases, scores, durationMs } =
     params;
+
+  const terminalSum = passedCases + failedCases + errorCases + skippedCases;
+  if (terminalSum > totalCases) {
+    throw new Error(
+      `calculateEvaluationMetrics: inconsistent inputs — ` +
+        `passedCases(${passedCases}) + failedCases(${failedCases}) + ` +
+        `errorCases(${errorCases}) + skippedCases(${skippedCases}) = ${terminalSum} ` +
+        `exceeds totalCases(${totalCases}).`,
+    );
+  }
+
   const evaluableCases = passedCases + failedCases;
   const passRate = evaluableCases > 0 ? passedCases / evaluableCases : null;
   const errorRate = totalCases > 0 ? errorCases / totalCases : 0;

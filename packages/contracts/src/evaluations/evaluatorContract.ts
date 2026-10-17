@@ -9,6 +9,7 @@ import {
   evaluationVerdictSchema,
   failureClassificationSchema,
 } from "./evaluationResult.js";
+import { MAX_RAW_OUTPUT_BYTES } from "./evaluationConstants.js";
 import { evaluationCaseIdSchema, existingRunTargetSchema } from "./evaluationSuite.js";
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -43,7 +44,7 @@ export const evaluatorOutputSchema = z.object({
   failureClassification: failureClassificationSchema.optional(),
   reason: z.string().default(""),
   assertions: z.array(assertionResultSchema).default([]),
-  rawOutputSnippet: z.string().max(4096).optional(),
+  rawOutputSnippet: z.string().max(MAX_RAW_OUTPUT_BYTES).optional(),
 });
 export type EvaluatorOutput = z.infer<typeof evaluatorOutputSchema>;
 
@@ -73,8 +74,8 @@ export interface IEvaluator {
  * Comparisons between mismatched evaluator IDs, versions, or metric types are invalid.
  */
 export function areEvaluatorMetricsComparable(
-  a: { id: string; version: string; metricType: EvaluatorMetricType },
-  b: { id: string; version: string; metricType: EvaluatorMetricType },
+  a: { id: EvaluatorId; version: string; metricType: EvaluatorMetricType },
+  b: { id: EvaluatorId; version: string; metricType: EvaluatorMetricType },
 ): boolean {
   return a.id === b.id && a.version === b.version && a.metricType === b.metricType;
 }

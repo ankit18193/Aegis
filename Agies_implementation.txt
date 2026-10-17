@@ -1,0 +1,1641 @@
+Yes. And I’d make one important change to the earlier plan:
+
+> **Aegis development will start from the frontend — but the frontend will be designed as the control plane for the system, not as a decorative UI.**
+
+That gives you something visible from Day 1 while we progressively build the distributed backend behind it.
+
+Below is the **master project description + implementation roadmap** I’d use for the entire Aegis project.
+
+---
+
+# Aegis
+
+## Distributed AI Agent Execution Platform
+
+### One-line description
+
+> **Aegis is a production-oriented distributed runtime for orchestrating, executing, recovering, evaluating, and observing long-running AI agent workflows across distributed workers.**
+
+---
+
+# 1. What is Aegis?
+
+Modern AI applications are moving beyond simple:
+
+```text
+User
+ ↓
+LLM
+ ↓
+Response
+```
+
+AI agents increasingly need to perform **long-running, multi-step tasks** involving reasoning, tools, external systems, files, APIs, databases, and multiple AI models.
+
+For example:
+
+> "Analyze this GitHub repository, identify performance bottlenecks, inspect relevant database queries, verify your findings, and generate a detailed engineering report."
+
+That request may require:
+
+```text
+User Goal
+   ↓
+Planning
+   ↓
+Task Creation
+   ↓
+Task Scheduling
+   ↓
+Distributed Execution
+   ↓
+Tool Calls
+   ↓
+Observations
+   ↓
+Additional Reasoning
+   ↓
+Evaluation
+   ↓
+Retry / Recovery
+   ↓
+Final Result
+```
+
+A normal backend request/response architecture isn't designed for this kind of workload.
+
+Aegis exists to solve that infrastructure problem.
+
+---
+
+# 2. What Aegis is NOT
+
+This distinction is important.
+
+Aegis is **not primarily**:
+
+* a ChatGPT clone
+* a chatbot
+* another RAG application
+* another AI SaaS dashboard
+* a collection of AI API integrations
+* a simple LangChain/LangGraph demo
+* an AI wrapper around an LLM
+
+Instead:
+
+> **Aegis is the infrastructure underneath an AI-agent application.**
+
+Think of it like an execution platform.
+
+The user gives Aegis a goal.
+
+Aegis handles:
+
+```text
+PLAN
+ ↓
+SCHEDULE
+ ↓
+EXECUTE
+ ↓
+PERSIST
+ ↓
+RECOVER
+ ↓
+EVALUATE
+ ↓
+OBSERVE
+```
+
+---
+
+# 3. The core problem
+
+Imagine this workflow:
+
+```text
+Research Task
+│
+├── Search web
+├── Read documents
+├── Extract information
+├── Analyze data
+├── Verify findings
+└── Generate report
+```
+
+Now imagine:
+
+### Worker crashes
+
+```text
+Task 3
+ ↓
+Worker 💥
+```
+
+Aegis must recover.
+
+---
+
+### LLM times out
+
+```text
+LLM Request
+ ↓
+Timeout
+```
+
+Aegis needs retry policies.
+
+---
+
+### Same task executes twice
+
+```text
+Worker A → Task completed
+Worker B → Same task executed
+```
+
+Aegis needs idempotency.
+
+---
+
+### Server restarts
+
+```text
+Aegis
+ ↓
+💥
+ ↓
+restart
+```
+
+The workflow shouldn't disappear.
+
+---
+
+### User closes browser
+
+The workflow should continue.
+
+---
+
+### Thousands of tasks arrive
+
+Aegis must distribute work across workers.
+
+---
+
+### AI produces a poor result
+
+The system should evaluate it and potentially retry/re-plan.
+
+---
+
+### Agent requests a dangerous tool
+
+The system should enforce authorization and policy.
+
+---
+
+These are the engineering problems Aegis is designed around.
+
+---
+
+# 4. The core mental model
+
+Everything in Aegis revolves around:
+
+```text
+                    USER GOAL
+                        │
+                        ▼
+                      AGENT
+                        │
+                 creates a plan
+                        │
+                        ▼
+                    WORKFLOW
+                        │
+                  creates tasks
+                        │
+          ┌─────────────┼─────────────┐
+          ▼             ▼             ▼
+        TASK A        TASK B        TASK C
+          │             │             │
+          ▼             ▼             ▼
+       WORKER         WORKER         WORKER
+          │             │             │
+          ▼             ▼             ▼
+        TOOLS         TOOLS         TOOLS
+          │             │             │
+          └─────────────┼─────────────┘
+                        ▼
+                     RESULTS
+                        │
+                        ▼
+                    EVALUATOR
+                        │
+                 ┌──────┴──────┐
+                 ▼             ▼
+               FAIL           PASS
+                 │             │
+                 ▼             ▼
+               RETRY          DONE
+```
+
+Around everything:
+
+```text
+Observability
+Security
+Persistence
+Event Infrastructure
+```
+
+---
+
+# 5. Aegis architecture — eventual target
+
+The final system will roughly look like:
+
+```text
+                         ┌─────────────────────┐
+                         │    Aegis Console    │
+                         │      Frontend       │
+                         └──────────┬──────────┘
+                                    │
+                                    ▼
+                         ┌─────────────────────┐
+                         │    API / Gateway    │
+                         └──────────┬──────────┘
+                                    │
+                                    ▼
+                    ┌────────────────────────────┐
+                    │    Agent Orchestrator      │
+                    │                            │
+                    │ Planner                    │
+                    │ Context Manager            │
+                    │ Model Router               │
+                    │ Policy Engine              │
+                    └──────────────┬─────────────┘
+                                   │
+                                   ▼
+                         ┌──────────────────┐
+                         │ Workflow Engine  │
+                         └────────┬─────────┘
+                                  │
+                                  ▼
+                              Event Bus
+                                  │
+                ┌─────────────────┼─────────────────┐
+                ▼                 ▼                 ▼
+          AI Worker #1      AI Worker #2      AI Worker #3
+                │                 │                 │
+                └─────────────────┼─────────────────┘
+                                  │
+                    ┌─────────────┼─────────────┐
+                    ▼             ▼             ▼
+                   LLM           MCP           Tools
+                    │             │             │
+                    └─────────────┼─────────────┘
+                                  │
+                                  ▼
+                            Evaluation
+                                  │
+                                  ▼
+                             PostgreSQL
+                                  │
+                   ┌──────────────┼──────────────┐
+                   ▼              ▼              ▼
+                 Redis        Vector Store    Object Store
+```
+
+And:
+
+```text
+Observability
+      │
+      ├── OpenTelemetry
+      ├── Metrics
+      ├── Logs
+      └── Traces
+
+Infrastructure
+      │
+      ├── Docker
+      ├── Kubernetes
+      └── Terraform
+
+CI/CD
+      │
+      └── GitHub Actions
+```
+
+**But we are NOT building all of this immediately.**
+
+---
+
+# 6. The most important development principle
+
+We're going to build Aegis **from the outside inward**.
+
+Meaning:
+
+```text
+USER EXPERIENCE
+      ↓
+FRONTEND
+      ↓
+API CONTRACTS
+      ↓
+BACKEND
+      ↓
+ORCHESTRATION
+      ↓
+DISTRIBUTED EXECUTION
+      ↓
+INFRASTRUCTURE
+```
+
+This is different from:
+
+```text
+Kafka
+ ↓
+PostgreSQL
+ ↓
+Backend
+ ↓
+Eventually make a UI
+```
+
+I don't want that.
+
+You should be able to **see the system evolving** throughout development.
+
+---
+
+# 🚀 AEGIS IMPLEMENTATION PLAN
+
+# Phase 0 — Repository & Engineering Foundation
+
+### Status
+
+This is the setup phase we just discussed.
+
+### Goal
+
+Create the engineering foundation.
+
+### Includes
+
+```text
+TypeScript
+pnpm monorepo
+ESLint
+Prettier
+Vitest
+package boundaries
+documentation
+CI
+Docker foundation
+```
+
+### Does NOT include
+
+```text
+AI
+Kafka
+PostgreSQL
+MCP
+Kubernetes
+```
+
+### Outcome
+
+A clean repository ready for development.
+
+---
+
+# Phase 1 — Aegis Console Frontend
+
+## 🚨 Development starts here
+
+Before implementing the distributed backend, we build the **Aegis Console**.
+
+The UI represents the control plane of the platform.
+
+The goal isn't to create a flashy dashboard.
+
+You specifically wanted a simple, ChatGPT-like UI, so we'll keep it:
+
+> **minimal, functional, information-dense, and professional.**
+
+---
+
+## Frontend concept
+
+Think:
+
+```text
+┌─────────────────────────────────────────────────────────────┐
+│ AEGIS                                      + New Run        │
+├──────────────┬──────────────────────────────────────────────┤
+│              │                                              │
+│ Workflows    │              Run Workspace                   │
+│              │                                              │
+│ + New Run    │  Analyze GitHub repository                   │
+│              │                                              │
+│ Recent       │  Status: Running                             │
+│              │                                              │
+│ Research     │  ┌────────────────────────────────────────┐  │
+│ Repo Audit   │  │ Workflow                               │  │
+│ Data Agent   │  │                                        │  │
+│              │  │ ✓ Planning                             │  │
+│              │  │ ✓ Repository Analysis                  │  │
+│              │  │ ⟳ Performance Analysis                │  │
+│              │  │ ○ Evaluation                           │  │
+│              │  │ ○ Final Report                         │  │
+│              │  └────────────────────────────────────────┘  │
+│              │                                              │
+│              │  Activity / Events                           │
+│              │                                              │
+│              │  Task completed                              │
+│              │  Worker started                              │
+│              │  Tool invoked                                │
+│              │                                              │
+└──────────────┴──────────────────────────────────────────────┘
+```
+
+Very simple.
+
+No unnecessary animations.
+
+No excessive cards.
+
+No "Dribbble-style dashboard drama."
+
+---
+
+# Frontend features
+
+### 1. New Run
+
+User enters:
+
+```text
+What do you want Aegis to do?
+
+[ Analyze this repository and find performance issues... ]
+
+                       [Run]
+```
+
+---
+
+### 2. Workflow list
+
+```text
+Recent Runs
+
+Repository Analysis
+Research Report
+Code Audit
+Data Analysis
+```
+
+---
+
+### 3. Run details
+
+Show:
+
+```text
+Goal
+Status
+Progress
+Tasks
+Events
+Output
+```
+
+---
+
+### 4. Task timeline
+
+```text
+✓ Planning
+✓ Task generation
+✓ Repository inspection
+⟳ Performance analysis
+○ Evaluation
+○ Final report
+```
+
+---
+
+### 5. Event stream
+
+Eventually this becomes real-time:
+
+```text
+12:31:04 Worker-03 started task
+12:31:05 GitHub tool invoked
+12:31:07 Repository fetched
+12:31:08 Analysis started
+```
+
+---
+
+### 6. Agent output
+
+Simple ChatGPT-like result area.
+
+---
+
+## Phase 1 technologies
+
+Initially:
+
+```text
+React
+TypeScript
+Vite
+Tailwind
+React Router
+TanStack Query
+```
+
+Potentially:
+
+```text
+Zustand
+```
+
+only if state management actually requires it.
+
+We won't add libraries just because they are popular.
+
+---
+
+# Phase 1 outcome
+
+At the end:
+
+You have a **fully designed Aegis Console**.
+
+But the backend can initially use:
+
+```text
+mock data
+```
+
+or local fixtures.
+
+This is intentional.
+
+We're establishing the **user experience and domain model first.**
+
+---
+
+# Phase 2 — Frontend → API Contract
+
+Now we ask:
+
+> What information does the frontend actually need?
+
+We'll define contracts such as:
+
+```text
+CreateRunRequest
+
+Run
+
+Task
+
+TaskStatus
+
+RunEvent
+
+RunResult
+```
+
+Example:
+
+```text
+Run
+
+id
+goal
+status
+createdAt
+updatedAt
+tasks
+result
+```
+
+Now the frontend stops depending on arbitrary mock objects.
+
+---
+
+## Goal
+
+Create a clear contract between:
+
+```text
+Frontend
+    ↕
+API
+```
+
+This is where you'll learn an important engineering concept:
+
+> **API design from consumer requirements.**
+
+---
+
+# Phase 3 — API Foundation
+
+Now build the backend API.
+
+Something like:
+
+```text
+POST   /runs
+GET    /runs
+GET    /runs/:id
+GET    /runs/:id/tasks
+GET    /runs/:id/events
+POST   /runs/:id/cancel
+```
+
+Initially:
+
+```text
+API
+ ↓
+in-memory state
+```
+
+No Kafka yet.
+
+No distributed workers yet.
+
+---
+
+# Phase 4 — Domain Model
+
+Now we properly define Aegis's domain.
+
+Core entities:
+
+```text
+Run
+Workflow
+Task
+TaskAttempt
+ToolCall
+Event
+Worker
+Evaluation
+```
+
+And states.
+
+For example:
+
+```text
+Task
+
+PENDING
+QUEUED
+RUNNING
+COMPLETED
+FAILED
+RETRYING
+CANCELLED
+```
+
+This phase is extremely important.
+
+Because we're now answering:
+
+> **What exactly does Aegis mean by a task being "running"?**
+
+---
+
+# Phase 5 — Persistent State
+
+Now introduce:
+
+## PostgreSQL
+
+Architecture becomes:
+
+```text
+Frontend
+   ↓
+API
+   ↓
+Domain
+   ↓
+PostgreSQL
+```
+
+We'll learn:
+
+```text
+schema design
+transactions
+indexes
+constraints
+concurrency
+optimistic locking
+connection pooling
+migrations
+```
+
+The database becomes the durable source of truth.
+
+---
+
+# Phase 6 — First Real Agent
+
+Now we finally bring AI into Aegis.
+
+Build the simplest possible agent loop:
+
+```text
+Goal
+ ↓
+LLM
+ ↓
+Plan
+ ↓
+Tasks
+```
+
+Then:
+
+```text
+Task
+ ↓
+LLM
+ ↓
+Decision
+ ↓
+Action
+ ↓
+Observation
+```
+
+No distributed workers yet.
+
+The goal is to understand the **agent execution model** first.
+
+---
+
+# Phase 7 — Tool System
+
+Now agents need capabilities.
+
+Create:
+
+```text
+Tool Registry
+```
+
+Conceptually:
+
+```text
+Tool
+├── name
+├── description
+├── schema
+├── permissions
+└── executor
+```
+
+Example:
+
+```text
+web.search
+repository.read
+file.read
+calculator
+```
+
+Agent:
+
+```text
+"What tool should I use?"
+```
+
+Aegis:
+
+```text
+Tool Registry
+ ↓
+Policy
+ ↓
+Execution
+```
+
+---
+
+# Phase 8 — MCP Integration
+
+Now introduce MCP.
+
+The architecture becomes:
+
+```text
+Agent
+ ↓
+Tool Registry
+ ↓
+MCP
+ ↓
+External Capability
+```
+
+We'll learn:
+
+* tool discovery
+* schemas
+* tool invocation
+* context
+* permissions
+* authentication
+* error handling
+
+---
+
+# Phase 9 — Workflow Engine
+
+This is where Aegis starts becoming a serious execution platform.
+
+Instead of:
+
+```text
+LLM → answer
+```
+
+we implement:
+
+```text
+Workflow
+│
+├── Task A
+├── Task B
+├── Task C
+│
+└── Task D
+```
+
+with dependencies:
+
+```text
+A ─────┐
+       ├── C
+B ─────┘
+        │
+        ▼
+        D
+```
+
+This introduces:
+
+```text
+DAG
+dependencies
+scheduling
+state transitions
+execution semantics
+```
+
+---
+
+# Phase 10 — Event-Driven Architecture
+
+Now we ask:
+
+> What happens when task execution becomes distributed?
+
+Introduce an event backbone.
+
+Eventually:
+
+```text
+Run Created
+Task Created
+Task Queued
+Task Started
+Task Completed
+Task Failed
+Tool Called
+Tool Completed
+Run Completed
+```
+
+Then introduce Kafka.
+
+Architecture:
+
+```text
+API
+ ↓
+Event
+ ↓
+Kafka
+ ↓
+Workers
+```
+
+Now Aegis becomes event-driven.
+
+---
+
+# Phase 11 — Distributed Workers
+
+Now create:
+
+```text
+Worker 1
+Worker 2
+Worker 3
+...
+Worker N
+```
+
+Workers consume tasks.
+
+```text
+Kafka
+  │
+  ├──── Worker 1
+  ├──── Worker 2
+  ├──── Worker 3
+  └──── Worker N
+```
+
+Now you'll learn:
+
+```text
+consumer groups
+partitions
+offsets
+delivery semantics
+rebalancing
+backpressure
+load distribution
+```
+
+---
+
+# Phase 12 — Durable Execution & Recovery
+
+This is one of the most important phases.
+
+Introduce:
+
+```text
+Checkpoints
+Task attempts
+Retry policies
+Timeouts
+Heartbeats
+Recovery
+Idempotency
+Dead-letter handling
+```
+
+Example:
+
+```text
+Task
+ ↓
+Worker A
+ ↓
+💥
+ ↓
+Recovery
+ ↓
+Worker B
+ ↓
+continue
+```
+
+The workflow doesn't disappear.
+
+---
+
+# Phase 13 — Real-Time Execution Updates
+
+Now connect the frontend to the live execution system.
+
+Frontend:
+
+```text
+Run
+ ↓
+WebSocket / SSE
+ ↓
+Live events
+```
+
+UI:
+
+```text
+✓ Task A
+✓ Task B
+⟳ Task C
+○ Task D
+```
+
+updates in real time.
+
+This is where your previous **Pulse/WebSocket knowledge** becomes useful without simply rebuilding Pulse.
+
+---
+
+# Phase 14 — AI Evaluation
+
+Now ask:
+
+> How do we know an agent actually did a good job?
+
+Introduce:
+
+```text
+Evaluator
+```
+
+Evaluation dimensions can include:
+
+```text
+Correctness
+Relevance
+Grounding
+Tool usage
+Task completion
+Trajectory quality
+```
+
+Pipeline:
+
+```text
+Agent Result
+     ↓
+Evaluator
+     ↓
+PASS / FAIL
+     │
+     ├── PASS → Complete
+     │
+     └── FAIL → Retry / Re-plan
+```
+
+---
+
+# Phase 15 — AI Security & Policy
+
+Now secure tool execution.
+
+Architecture:
+
+```text
+Agent
+ ↓
+Tool Request
+ ↓
+Policy Engine
+ ↓
+Authorization
+ ↓
+Risk Check
+ ↓
+Human Approval if required
+ ↓
+Tool
+```
+
+We'll explore:
+
+```text
+least privilege
+tool permissions
+prompt injection
+indirect prompt injection
+data leakage
+context isolation
+dangerous operations
+human-in-the-loop
+```
+
+---
+
+# Phase 16 — Observability
+
+Now we make Aegis operable.
+
+Introduce:
+
+```text
+OpenTelemetry
+Metrics
+Logs
+Traces
+```
+
+A single run should be traceable:
+
+```text
+Run
+│
+├── Planner
+│   └── LLM
+│
+├── Task
+│
+├── Kafka
+│
+├── Worker
+│   └── MCP
+│
+├── Tool
+│
+└── Evaluator
+```
+
+You should eventually be able to answer:
+
+> Why did this workflow take 12 seconds?
+
+> Which worker failed?
+
+> Which LLM call was slow?
+
+> How many retries happened?
+
+> Which tool produced the failure?
+
+---
+
+# Phase 17 — Performance Engineering
+
+Now we stress the system.
+
+Test:
+
+```text
+10 workflows
+100 workflows
+1,000 workflows
+10,000 tasks
+```
+
+Measure:
+
+```text
+throughput
+latency
+queue delay
+worker utilization
+LLM latency
+task completion time
+failure rate
+retry rate
+```
+
+Use load testing and controlled failure scenarios.
+
+This is where your existing performance/testing knowledge gets pushed much further.
+
+---
+
+# Phase 18 — Kubernetes
+
+Only now.
+
+Because now we actually have a distributed workload.
+
+Deploy:
+
+```text
+API
+Workers
+Kafka
+PostgreSQL
+Redis
+Observability
+```
+
+Learn:
+
+```text
+Pods
+Deployments
+Services
+Ingress
+HPA
+resource limits
+health probes
+rolling deployments
+config
+secrets
+```
+
+---
+
+# Phase 19 — Infrastructure as Code
+
+Introduce:
+
+## Terraform
+
+Define infrastructure reproducibly.
+
+Conceptually:
+
+```text
+Terraform
+   ↓
+Cloud Infrastructure
+   ↓
+Aegis
+```
+
+No manually clicking through AWS forever.
+
+---
+
+# Phase 20 — CI/CD
+
+Build the final delivery pipeline:
+
+```text
+Git push
+   ↓
+GitHub Actions
+   ↓
+Lint
+   ↓
+Tests
+   ↓
+Build
+   ↓
+Docker
+   ↓
+Security checks
+   ↓
+Deploy
+```
+
+Eventually:
+
+```text
+Development
+     ↓
+Staging
+     ↓
+Production
+```
+
+---
+
+# Phase 21 — Production Hardening
+
+Final engineering pass.
+
+We'll investigate:
+
+```text
+failure scenarios
+security
+rate limits
+timeouts
+resource exhaustion
+backpressure
+graceful shutdown
+data consistency
+duplicate execution
+observability gaps
+cost control
+```
+
+Then run controlled chaos experiments.
+
+For example:
+
+```text
+Kill worker
+ ↓
+Does task recover?
+```
+
+```text
+Kill API
+ ↓
+Does workflow continue?
+```
+
+```text
+Kill Kafka consumer
+ ↓
+Does processing resume?
+```
+
+```text
+LLM timeout
+ ↓
+Does retry work?
+```
+
+This is where the project becomes genuinely interesting.
+
+---
+
+# Final Aegis Architecture
+
+At the end, the system looks approximately like:
+
+```text
+                         ┌────────────────────────┐
+                         │      AEGIS CONSOLE     │
+                         │                        │
+                         │ Runs                   │
+                         │ Tasks                  │
+                         │ Events                 │
+                         │ Results                │
+                         └───────────┬────────────┘
+                                     │
+                                  HTTPS
+                                     │
+                                     ▼
+                         ┌────────────────────────┐
+                         │       API LAYER        │
+                         └───────────┬────────────┘
+                                     │
+                                     ▼
+                    ┌────────────────────────────────┐
+                    │      AGENT ORCHESTRATOR        │
+                    │                                │
+                    │ Planner                        │
+                    │ Context Manager                │
+                    │ Model Router                   │
+                    │ Policy Engine                  │
+                    └───────────────┬────────────────┘
+                                    │
+                                    ▼
+                         ┌─────────────────────┐
+                         │   WORKFLOW ENGINE   │
+                         └──────────┬──────────┘
+                                    │
+                                    ▼
+                                  Kafka
+                                    │
+                 ┌──────────────────┼──────────────────┐
+                 ▼                  ▼                  ▼
+             Worker 1           Worker 2           Worker N
+                 │                  │                  │
+                 └──────────────────┼──────────────────┘
+                                    │
+                     ┌──────────────┼──────────────┐
+                     ▼              ▼              ▼
+                    LLM            MCP            Tools
+                     │              │              │
+                     └──────────────┼──────────────┘
+                                    │
+                                    ▼
+                               EVALUATOR
+                                    │
+                                    ▼
+                              PostgreSQL
+                                    │
+                       ┌────────────┼────────────┐
+                       ▼            ▼            ▼
+                    Redis       Vector DB     Object Store
+
+
+             ┌──────────────────────────────────────┐
+             │          OBSERVABILITY               │
+             │                                      │
+             │ OpenTelemetry                        │
+             │ Metrics                              │
+             │ Logs                                 │
+             │ Distributed Tracing                  │
+             └──────────────────────────────────────┘
+
+
+             ┌──────────────────────────────────────┐
+             │          INFRASTRUCTURE              │
+             │                                      │
+             │ Docker                               │
+             │ Kubernetes                           │
+             │ Terraform                            │
+             │ GitHub Actions                       │
+             └──────────────────────────────────────┘
+```
+
+---
+
+# 🧭 The development journey
+
+The entire journey can be visualized as:
+
+```text
+PHASE 0
+Repository
+   │
+   ▼
+PHASE 1
+Frontend Console
+   │
+   ▼
+PHASE 2
+API Contracts
+   │
+   ▼
+PHASE 3
+Backend API
+   │
+   ▼
+PHASE 4
+Domain Model
+   │
+   ▼
+PHASE 5
+PostgreSQL
+   │
+   ▼
+PHASE 6
+Agent Runtime
+   │
+   ▼
+PHASE 7
+Tool System
+   │
+   ▼
+PHASE 8
+MCP
+   │
+   ▼
+PHASE 9
+Workflow Engine
+   │
+   ▼
+PHASE 10
+Kafka
+   │
+   ▼
+PHASE 11
+Distributed Workers
+   │
+   ▼
+PHASE 12
+Durable Execution
+   │
+   ▼
+PHASE 13
+Real-time Updates
+   │
+   ▼
+PHASE 14
+AI Evaluation
+   │
+   ▼
+PHASE 15
+AI Security
+   │
+   ▼
+PHASE 16
+Observability
+   │
+   ▼
+PHASE 17
+Performance
+   │
+   ▼
+PHASE 18
+Kubernetes
+   │
+   ▼
+PHASE 19
+Terraform
+   │
+   ▼
+PHASE 20
+CI/CD
+   │
+   ▼
+PHASE 21
+Production Hardening
+```
+
+---
+
+# 🎯 What this does for your profile
+
+The important thing isn't that your resume eventually contains:
+
+```text
+Kafka
+Kubernetes
+Terraform
+MCP
+PostgreSQL
+OpenTelemetry
+```
+
+Anyone can list technologies.
+
+The real value is that you'll be able to explain **why they exist**.
+
+For example:
+
+**Interviewer:**
+*"Why Kafka?"*
+
+You:
+
+> "Initially Aegis used synchronous execution. Once workflows became distributed, task execution needed a durable event-driven transport between the orchestrator and workers. We introduced Kafka for that boundary and used consumer groups to distribute execution across workers."
+
+That's much stronger than:
+
+> "I used Kafka in my project."
+
+Same with Kubernetes:
+
+> "We introduced Kubernetes after the worker layer became horizontally scalable and independently deployable."
+
+Same with PostgreSQL:
+
+> "Workflow state needed durable transactional persistence because execution could outlive individual workers and API processes."
+
+Same with OpenTelemetry:
+
+> "A workflow spans the API, orchestrator, event bus, worker, LLM and tool layers, so distributed tracing was necessary to understand latency and failures across those boundaries."
+
+**That's the level we're targeting.**
+
+---
+
+# And yes — FRONTEND FIRST
+
+This is now a hard rule for Aegis:
+
+> **We don't start by building Kafka. We don't start by building the agent. We don't start by building PostgreSQL.**
+
+We start with:
+
+```text
+                    USER
+                     │
+                     ▼
+             ┌──────────────┐
+             │ AEGIS CONSOLE│
+             └──────┬───────┘
+                    │
+                    ▼
+              "Create a Run"
+                    │
+                    ▼
+              "Track a Run"
+                    │
+                    ▼
+              "See Tasks"
+                    │
+                    ▼
+              "See Events"
+                    │
+                    ▼
+              "See Result"
+```
+
+Then we'll build the backend **to satisfy what the frontend needs**.
+
+That gives us a very clean development loop:
+
+```text
+DESIGN
+  ↓
+BUILD UI
+  ↓
+DEFINE CONTRACT
+  ↓
+BUILD BACKEND
+  ↓
+CONNECT
+  ↓
+TEST
+  ↓
+ASK WHAT BREAKS
+  ↓
+INTRODUCE NEXT SYSTEM
+```
+
+And that's exactly how I want us to approach Aegis: **one problem at a time, one architectural decision at a time, with every new technology introduced because the system has earned the need for it.**

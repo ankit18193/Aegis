@@ -1,0 +1,23 @@
+Phase	Name	What we build
+0	Engineering Foundation	Monorepo, TypeScript, tooling, package boundaries, CI, Docker foundation, docs.
+1	Aegis Console — Frontend	Simple ChatGPT-like UI for creating runs, viewing workflows, tasks, events, and results.
+2	API Contracts	Define Run, Workflow, Task, Event, Result and other frontend/backend contracts.
+3	API Foundation	Build the initial backend API and connect it to the frontend.
+4	Domain Model	Define workflow/task lifecycle, states, dependencies, attempts, and execution rules.
+5	Persistent State	Introduce PostgreSQL for durable workflow and execution state.
+6	Agent Runtime	Build the first real agent loop: goal → reasoning → action → observation.
+7	Tool System	Create a structured tool registry, schemas, execution layer, and permissions.
+8	MCP Integration	Connect Aegis agents to external capabilities through MCP.
+9	Workflow Engine	Support multi-step workflows, task dependencies, DAGs, scheduling, and state transitions.
+10	Event Infrastructure	Introduce Kafka for reliable event-driven task distribution.
+11	Distributed Workers	Execute tasks across multiple workers using Kafka consumer groups.
+12	Durable Execution	Add checkpoints, retries, timeouts, heartbeats, idempotency, and failure recovery.
+13	Real-Time Execution	Stream workflow/task updates from backend to the frontend.
+14	AI Evaluation	Evaluate agent outputs, tool usage, grounding, correctness, and trigger re-planning/retries.
+15	AI Security & Policies	Tool authorization, policy engine, prompt-injection defenses, approvals, and isolation.
+16	Observability	OpenTelemetry, distributed tracing, metrics, structured logs, and Grafana dashboards.
+17	Performance Engineering	Load testing, throughput/latency analysis, bottleneck identification, and optimization.
+18	Kubernetes	Container orchestration, worker scaling, health checks, deployments, and resource management.
+19	Terraform / IaC	Define cloud infrastructure as reproducible code.
+20	CI/CD	Automated testing, builds, containerization, security checks, and deployment pipeline.
+21	Production Hardening	Chaos testing, failure scenarios, security review, resilience, cost controls, and final polish.

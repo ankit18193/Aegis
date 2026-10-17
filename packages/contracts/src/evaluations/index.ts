@@ -2,6 +2,7 @@
 // Evaluation Domain Contracts Barrel Exports
 // ─────────────────────────────────────────────────────────────────────────────
 
+export * from "./evaluationConstants.js";
 export * from "./evaluationSuite.js";
 export * from "./evaluationRun.js";
 export * from "./evaluationResult.js";

@@ -3,6 +3,8 @@ import { z } from "zod";
 
 import { eventIdSchema, runIdSchema } from "../runs.js";
 
+import { MAX_RAW_OUTPUT_BYTES } from "./evaluationConstants.js";
+
 import { evaluationRunIdSchema } from "./evaluationRun.js";
 import {
   evaluationCaseIdSchema,
@@ -77,7 +79,7 @@ export const evaluationEvidenceSchema = z.object({
   inspectedRunId: runIdSchema,
   inspectedEventIds: z.array(eventIdSchema).optional(),
   assertions: z.array(assertionResultSchema).default([]),
-  rawOutputSnippet: z.string().max(4096).optional(),
+  rawOutputSnippet: z.string().max(MAX_RAW_OUTPUT_BYTES).optional(),
 });
 export type EvaluationEvidence = z.infer<typeof evaluationEvidenceSchema>;
 
